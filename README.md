@@ -10,6 +10,7 @@ TPM is a cross-platform command-line utility to download and install packages fr
 
 - List locally installed packages
 - Fetch package index from a remote repository
+- Check installed packages for available updates (`updates`)
 - Install packages from remote
 - Automatically installs to a writable path in `$auto_path`
 - Works on Windows, Linux, macOS
@@ -51,6 +52,7 @@ tclsh main.tcl
 > installed
 > installed nats jsonlib
 > available
+> updates
 > install nats
 > exit
 ```

@@ -38,6 +38,9 @@ namespace eval tpm {
                 available {
                     :list_remote
                 }
+                updates {
+                    :list_updates
+                }
                 system {
                     :cputs green "System information:"
                     :cputs red "------------------------------------------------------"
@@ -118,6 +121,30 @@ namespace eval tpm {
             }
         }
 
+        :public method list_updates {} {
+            try {
+                set updates [${:pkgdbObj} check_updates]
+                :cputs green "Available package updates:"
+                :cputs red "------------------------------------------------------"
+                if {[llength $updates] == 0} {
+                    :cputs_multi [list green " ✓ " yellow "All packages are up to date."]
+                    return
+                }
+                foreach upd $updates {
+                    set line [list \
+                        cyan " - " \
+                        yellow [format "%-20s" [dict get $upd name]] \
+                        green  [format "%-8s" [dict get $upd local_version]] \
+                        magenta " -> " \
+                        green  [format "%-8s" [dict get $upd remote_version]] \
+                    ]
+                    :cputs_multi $line
+                }
+            } on error {errMsg} {
+                :cputs_multi [list red_bold "Error: " red "$errMsg"]
+            }
+        }
+
         :method install_package {pkgName} {
             set inst [::tpm::installer new -pkgdbObj ${:pkgdbObj}] 
             $inst install $pkgName
@@ -142,6 +169,7 @@ namespace eval tpm {
             :cputs_multi [list green "  installed                 " blue "List all locally installed packages"]
             :cputs_multi [list green "  installed <name(s)>       " blue "Show version info of a specific installed package(s)"]
             :cputs_multi [list green "  available                 " blue "List packages in the remote repository"]
+            :cputs_multi [list green "  updates                   " blue "Check installed packages for available updates"]
             :cputs_multi [list green "  install <name>            " blue "Install package from the remote repository"]
             :cputs_multi [list green "  delete <name>             " blue "Delete (uninstall) package"]
             :cputs_multi [list green "  system                    " blue "Shows current system information"]
