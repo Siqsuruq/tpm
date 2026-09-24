@@ -36,7 +36,13 @@ namespace eval tpm {
                 return
             }
 
-            set install_dir [[::tpm::system new] get_install_path]
+            if {[catch {
+                set install_dir [[::tpm::system new] get_install_path]
+            } path_err]} {
+                :cputs_multi [list red "✗ Unable to determine install location: " yellow "$path_err"]
+                file delete -force $temp_file
+                return
+            }
             :cputs_multi [list green "Installing to: " blue "$install_dir"]
             if {[catch {
                 # exec unzip -o $temp_file -d $install_dir

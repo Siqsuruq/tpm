@@ -7,34 +7,65 @@ namespace eval tpm {
         }
 
         :public method get_install_path {} {
-            # Use saved pre-libs auto_path
-            foreach path $::tpm::libsdirs {
+            # Choose the first writable entry of the saved pre-libs auto_path.
+            # tpm's own libs/ is already excluded upstream (config.tcl), as it
+            # holds tpm's dependencies and must never receive user packages.
+            # Note the full list is used here, not ::tpm::libsdirs, which is
+            # filtered down to top-level roots only.
+            set checked {}
+            foreach path $::tpm::autopaths {
+                lappend checked $path
                 if {[file writable $path]} {
                     return $path
                 }
             }
-            set home [file normalize ~]
-            set fallback [file join $home .local lib tpm]
-            file mkdir $fallback
-            return $fallback
+
+            set msg "No writable library directory found for installation."
+            append msg "\nThe following directories were checked:"
+            foreach path $checked {
+                append msg "\n  - $path"
+            }
+            append msg "\nNone of them are writable."
+            append msg "\nRe-run as a user with write access to one of these directories,"
+            append msg " or change the ownership/permissions of the directory to install into."
+            error $msg
         }
 
         :public method print_summary {} {
-            :cputs_multi [list green "Tcl Version: " blue "$::tcl_version"]
-            :cputs_multi [list green "Tcl executable path: " blue "[info nameofexecutable]"]
-            :cputs_multi [list green "Tcl library path: " blue "$::tcl_library"]
-            :cputs_multi [list green "Tcl executable path: " blue "[info nameofexecutable]"]
+            set base [file dirname [file normalize [info script]]]
+            set table [zesty::Table new -box {type "rounded"}]
+            $table addColumn -name "System information" -width 20 -style {fg green}
+            $table addColumn -name "*" -justify "left" -style {fg blue bold 1}
+            $table addRow "Tcl Version" "[info patchlevel]"
+            $table addRow "Tcl Platform" "[platform::generic]"
+            $table addRow "Config path" "[file join $base var config]"
+            $table addRow "Tcl executable path" "[info nameofexecutable]"
+            $table addRow "Tcl library path" "$::tcl_library"
+            $table addRow "Tcl auto_path" "$::tpm::autopaths"
+            $table addRow "Tcl modules path" "[::tcl::tm::path list]"
+            $table display
 
-            :cputs green "Package path(s):"
-            foreach path $::auto_path {
-                :cputs blue "    $path"
+            set table [zesty::Table new -box {type "rounded"}]
+            $table addColumn -name "Package path(s):" -width 40 -style {fg green}
+            $table addColumn -name "Writable" -justify "left" -style {fg blue bold 1} -width 16
+
+
+            foreach path $::tpm::autopaths {
+                $table addRow "$path" "[:check_writable $path]"
             }
 
-            :cputs_multi [list green "Tcl Platform: " blue "[platform::generic]"]
-            :cputs_multi [list green "Writable install path: " blue "[:get_install_path]"]
+            $table display
 
-            set base [file dirname [file normalize [info script]]]
-            :cputs_multi [list green "Config path: " blue "[file join $base var config]"]
+            #:cputs_multi [list green "Writable install path: " blue "[:get_install_path]"]
+        }
+
+        :method check_writable {path} {
+            # Inline <s ...> markup is rendered as colored text by zesty's parser.
+            if {[file writable $path]} {
+                return [zesty::parseStyleDictToXML "writable" {fg green bold 1}]
+            } else {
+                return [zesty::parseStyleDictToXML "no permission to write in this folder" {fg red bold 1}]
+            }
         }
 
         :public method get_tcl_version_major {args} {

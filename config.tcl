@@ -33,6 +33,10 @@ namespace eval tpm {
                     lappend filtered_auto_path $path
                 }
             }
+            # Full candidate list (excluding tpm's own libs/) used when choosing
+            # an install destination. Unlike libsdirs this keeps subdirectories,
+            # because the per-package dirs are exactly the writable targets.
+            set ::tpm::autopaths $filtered_auto_path
             set ::tpm::libsdirs [:get_top_level_paths $filtered_auto_path]
         }
 

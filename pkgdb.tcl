@@ -47,15 +47,34 @@ namespace eval tpm {
         # Check local installed packages against the remote repository and return
         # a list of dicts {name local_version remote_version latest_remote_pkg}
         # for every installed package that has a newer version available remotely.
+        #
+        # A package name may be installed at several versions at once (e.g. a
+        # tcllib directory whose pkgIndex.tcl declares both 1.3 and 2.3). For the
+        # purpose of update detection the package counts as installed at its
+        # highest local version, so at most one row is emitted per name and older
+        # co-installed versions do not produce phantom updates.
         :public method check_updates {} {
             if {[llength ${:available_pkgs}] == 0} {
                 :refresh_remote
             }
-            set updates {}
+
+            # Group installed entries by name, keeping the highest version seen.
+            set latest_local [dict create]
             foreach local ${:installed_pkgs} {
                 set name    [dict getnull $local name]
                 set local_v [dict getnull $local version]
-                set remote  [:find_remote_latest $name]
+                if {$name eq "" || $local_v eq ""} {
+                    continue
+                }
+                if {![dict exists $latest_local $name] ||
+                    [package vcompare $local_v [dict get $latest_local $name]] > 0} {
+                    dict set latest_local $name $local_v
+                }
+            }
+
+            set updates {}
+            dict for {name local_v} $latest_local {
+                set remote [:find_remote_latest $name]
                 if {$remote eq ""} {
                     continue
                 }

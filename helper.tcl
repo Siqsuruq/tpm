@@ -2,20 +2,31 @@ namespace eval tpm {
     nx::Class create Helper {
         :property colors
         :method init {} {
-            # Initialize the colors dict
+            # Named colors exposed by the tpm UI. Each entry maps a logical
+            # name used across the client to a zesty style specification
+            # (foreground color plus optional style flags).
             set :colors {
-                red_bold "1;31"
-                red     "0;31"
-                green   "0;32"
-                yellow  "1;33"
-                blue    "1;34"
-                magenta "1;35"
-                cyan    "1;36"
-                reset   "0"
+                red_bold {fg red bold 1}
+                red      {fg red}
+                green    {fg green}
+                yellow   {fg yellow bold 1}
+                blue     {fg blue bold 1}
+                magenta  {fg magenta bold 1}
+                cyan     {fg cyan}
+                reset    {}
             }
             next
         }
- 
+
+        :public method style {color} {
+            # Translate a tpm logical color name into a zesty style list.
+            # Unknown names yield an empty style, i.e. plain output.
+            if {$color ne "" && [dict exists ${:colors} $color]} {
+                return [dict get ${:colors} $color]
+            }
+            return {}
+        }
+
         :public method cputs {args} {
             set color ""
             set text ""
@@ -29,26 +40,23 @@ namespace eval tpm {
                 error "Usage: cputs ?color? text"
             }
 
-            if {$color ne "" && [dict exists ${:colors} $color]} {
-                set code [dict get ${:colors} $color]
-                puts "\x1b\[[set code]m$text\x1b\[0m"
-            } else {
-                puts $text
-            }
+            zesty::echo $text -style [:style $color]
         }
 
         :public method cputs_multi {segments} {
-            set result ""
+            # Render a flat {color text color text ...} list as a single
+            # styled line. Segments whose color is unknown are emitted
+            # unstyled, matching the previous escape-code behaviour.
+            set rendered ""
             foreach {color text} $segments {
-                if {[dict exists ${:colors} $color]} {
-                    set code [dict get ${:colors} $color]
-                    append result "\x1b\[[set code]m$text"
+                set style [:style $color]
+                if {[llength $style]} {
+                    append rendered [zesty::parseStyle $text $style]
                 } else {
-                    append result $text
+                    append rendered $text
                 }
             }
-            append result "\x1b\[0m"
-            puts $result
+            zesty::echo $rendered -noreset
         }
     }
 }
