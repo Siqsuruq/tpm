@@ -1,0 +1,22 @@
+set __dir__ $dir 
+foreach index [concat \
+		   [glob -nocomplain [file join $dir * pkgIndex.tcl]] \
+		   [glob -nocomplain [file join $dir * * pkgIndex.tcl]] \
+		   [glob -nocomplain [file join $dir * * * pkgIndex.tcl]]] {
+  set dir [file dirname $index]
+  source $index
+} 
+set dir $__dir__ 
+unset __dir__ 
+
+
+
+if {[package vsatisfies [package provide Tcl] 9]} {
+    package ifneeded nsf 2.5.0 \
+	    "[list load [file join $dir tcl9nsf250.dll]];
+             [list package provide nsf 2.5.0]"
+} else {
+    package ifneeded nsf 2.5.0 \
+	    "[list load [file join $dir nsf250.dll]];
+             [list package provide nsf 2.5.0]"
+}

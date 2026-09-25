@@ -100,18 +100,9 @@ namespace eval tpm {
 
         :public method list_installed {} {
             if {[llength ${:installed_pkgs}] == 0} {
-                puts " (none found)"
+                return ""
             } else {
-                foreach pkgDict ${:installed_pkgs} {
-                    set line [list \
-                        cyan " - " \
-                        yellow [format "%-20s" [dict getnull $pkgDict name]] \
-                        green  [format "%-8s" [dict getnull $pkgDict version]] \
-                        cyan  [format "%-40s" [dict getnull $pkgDict path]] \
-                        magenta [format "%-9s" [dict getnull $pkgDict type]] \
-                    ]
-                    :cputs_multi $line
-                }
+				return ${:installed_pkgs}
             }
         }
 

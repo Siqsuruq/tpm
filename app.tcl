@@ -8,6 +8,7 @@ namespace eval tpm {
         }
 
         :public method start {} {
+			echo [zesty::box -title {name "Info" anchor "nc"} -content {text "Your content here"} ]
             :cputs green "Welcome to tpm (NX version) Version: [::tpm::config cget -tpm_version]"
             :cputs_multi [list green "Type " blue "'help' " green "for commands. Type " blue "'exit' " green "to quit."]
             :cputs_multi [list green "Repository: " blue "[::tpm::config cget -default_repo_url]"]
@@ -73,27 +74,33 @@ namespace eval tpm {
         :method list_local {args} {
             :cputs green "Locally installed packages:"
             :cputs red "------------------------------------------------------"
+			set table [zesty::Table new -box {type "rounded"}]
+            $table addColumn -name "Package" -width 25 -style {fg yellow}
+			$table addColumn -name "Version" -width 10 -style {fg green}
+			$table addColumn -name "Path" -width 40 -style {fg cyan}
+            $table addColumn -name "Type" -justify "left" -style {fg gray}
             if {[llength $args] == 0} {
-                ${:pkgdbObj} list_installed
+				set pkgs [${:pkgdbObj} list_installed]
+				if {$pkgs ne ""} {
+					foreach pkgDict $pkgs {
+						$table addRow "[dict get $pkgDict name]" "[dict get $pkgDict version]" "[dict get $pkgDict path]" "[dict get $pkgDict type]"
+					}
+				} else {
+					$table addRow "<s fg=red>There is no packages installed.</s>" "" "" ""
+				}
             } else {
                 foreach pkg $args {
                     if {[${:pkgdbObj} is_installed $pkg]} {
                         set versions [${:pkgdbObj} get_installed_packages_by_name $pkg]
                         foreach pkgDict $versions {
-                            set line [list \
-                                cyan " - " \
-                                yellow [format "%-20s" [dict get $pkgDict name]] \
-                                green  [format "%-8s" [dict get $pkgDict version]] \
-                                cyan  [format "%-40s" [dict get $pkgDict path]] \
-                                magenta [format "%-9s" [dict get $pkgDict type]] \
-                            ]
-                            :cputs_multi $line
+							$table addRow "[dict get $pkgDict name]" "[dict get $pkgDict version]" "[dict get $pkgDict path]" "[dict get $pkgDict type]"
                         }
                     } else {
-                        :cputs_multi [list cyan " - " yellow "$pkg" red " is not installed."]
+						$table addRow "$pkg <s fg=red>is not installed.</s>" "" "" ""
                     }
                 }
             }
+			$table display
         }
 
         :public method list_remote {} {
@@ -101,21 +108,15 @@ namespace eval tpm {
                 set net [::tpm::net new]
                 set packages [$net fetch_package_index]
                 $net destroy
+				set table [zesty::Table new -box {type "rounded"}]
+				$table addColumn -name "Package" -width 25 -style {fg yellow}
+				$table addColumn -name "Version" -width 10 -style {fg green}
+				$table addColumn -name "Platform" -width 15 -style {fg blue}
+				$table addColumn -name "Description" -justify "left" -style {fg gray}
                 foreach pkg $packages {
-                    set name      [dict get $pkg package_name]
-                    set version   [dict get $pkg version]
-                    set platform  [dict get $pkg platform_name]
-                    set desc      [dict get $pkg package_description]
-
-                    set line [list \
-                        cyan " - " \
-                        yellow [format "%-20s" $name] \
-                        green  [format "%-8s" $version] \
-                        blue   [format "(%s): " $platform] \
-                        magenta $desc \
-                    ]
-                    :cputs_multi $line
+					$table addRow "[dict get $pkg package_name]" "[dict get $pkg version]" "[dict get $pkg platform_name]" "[dict get $pkg package_description]"
                 }
+				$table display
             } on error {errMsg} {
                 :cputs_multi [list red_bold "Error: " red "$errMsg"]
             }
@@ -164,17 +165,31 @@ namespace eval tpm {
         }
 
         :method help {} {
-            :cputs green "Available commands:"
-            :cputs red "------------------------------------------------------"
-            :cputs_multi [list green "  installed                 " blue "List all locally installed packages"]
-            :cputs_multi [list green "  installed <name(s)>       " blue "Show version info of a specific installed package(s)"]
-            :cputs_multi [list green "  available                 " blue "List packages in the remote repository"]
-            :cputs_multi [list green "  updates                   " blue "Check installed packages for available updates"]
-            :cputs_multi [list green "  install <name>            " blue "Install package from the remote repository"]
-            :cputs_multi [list green "  delete <name>             " blue "Delete (uninstall) package"]
-            :cputs_multi [list green "  system                    " blue "Shows current system information"]
-            :cputs_multi [list green "  help                      " blue "Show this help message"]
-            :cputs_multi [list green "  exit                      " blue "Exit the package manager"]
+			set data {
+				{"installed" "List all locally installed packages"}
+				{"installed <s fg=red>name(s)</s>" "Show version info of a specific installed package(s)"}
+				{"available" "List packages in the remote repository"}
+				{"install <s fg=red>name</s>" "Install package from the remote repository"}
+				{"updates" "Check installed packages for available updates"}
+				{"delete <s fg=red>name</s>" "Delete (uninstall) package"}
+				{"system" "Shows current system information"}
+				{"help" "Show this help message"}
+				{"exit" "Exit the package manager"}
+			}
+
+			zesty::echo [zesty::box -title {name "Help" anchor "nw" style {fg 159}} -box {style {bold 1 fg gray}} \
+				-content [list text $data \
+					table {
+						enabled "true"
+						columns {20 60}
+						alignments {"left" "left" "left"}
+						styles {
+							{bold 1}
+							{}
+						}
+					} \
+				]
+			]
         }
     }
 }

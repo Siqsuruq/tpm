@@ -32,6 +32,7 @@ namespace eval tpm {
         }
 
         :public method print_summary {} {
+			# Show table with general information about installed Tcl
             set base [file dirname [file normalize [info script]]]
             set table [zesty::Table new -box {type "rounded"}]
             $table addColumn -name "System information" -width 20 -style {fg green}
@@ -45,18 +46,15 @@ namespace eval tpm {
             $table addRow "Tcl modules path" "[::tcl::tm::path list]"
             $table display
 
+			# Show table with path and check if this directory is writable so tpm can download package there
             set table [zesty::Table new -box {type "rounded"}]
             $table addColumn -name "Package path(s):" -width 40 -style {fg green}
-            $table addColumn -name "Writable" -justify "left" -style {fg blue bold 1} -width 16
-
-
+            $table addColumn -name "Writable" -justify "left" -style {fg blue bold 1}
             foreach path $::tpm::autopaths {
                 $table addRow "$path" "[:check_writable $path]"
             }
-
             $table display
 
-            #:cputs_multi [list green "Writable install path: " blue "[:get_install_path]"]
         }
 
         :method check_writable {path} {
@@ -64,7 +62,7 @@ namespace eval tpm {
             if {[file writable $path]} {
                 return [zesty::parseStyleDictToXML "writable" {fg green bold 1}]
             } else {
-                return [zesty::parseStyleDictToXML "no permission to write in this folder" {fg red bold 1}]
+                return [zesty::parseStyleDictToXML "not writable" {fg red bold 1}]
             }
         }
 
