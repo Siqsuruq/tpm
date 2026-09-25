@@ -8,10 +8,18 @@ namespace eval tpm {
         }
 
         :public method start {} {
-			echo [zesty::box -title {name "Info" anchor "nc"} -content {text "Your content here"} ]
-            :cputs green "Welcome to tpm (NX version) Version: [::tpm::config cget -tpm_version]"
-            :cputs_multi [list green "Type " blue "'help' " green "for commands. Type " blue "'exit' " green "to quit."]
-            :cputs_multi [list green "Repository: " blue "[::tpm::config cget -default_repo_url]"]
+        set v [::tpm::config cget -tpm_version]
+        set bb [zesty::box \
+            -title {name "TPM - Tcl Package Manager" anchor "nw"} \
+            -content {text "<s fg=green>Welcome to tpm (NX version) Version: $v</s>\n \
+            <s fg=green>Type </s><s fg=blue>'help'</s><s fg=green> for commands. Type  </s><s fg=blue>'exit'</s><s fg=green> to quit</s> \n \
+            <s fg=green>Repository: </s><s fg=blue>[::tpm::config cget -default_repo_url]</s>"} \
+            -box {size {300 5}} \
+            -paddingX 1 \
+            -paddingY 0
+        ]
+
+        zesty::echo $bb
             :cputs red "------------------------------------------------------"
 
             while {1} {
@@ -75,9 +83,9 @@ namespace eval tpm {
             :cputs green "Locally installed packages:"
             :cputs red "------------------------------------------------------"
 			set table [zesty::Table new -box {type "rounded"}]
-            $table addColumn -name "Package" -width 25 -style {fg yellow}
+            $table addColumn -name "Package" -width 40 -style {fg yellow}
 			$table addColumn -name "Version" -width 10 -style {fg green}
-			$table addColumn -name "Path" -width 40 -style {fg cyan}
+			$table addColumn -name "Path" -width 50 -style {fg cyan}
             $table addColumn -name "Type" -justify "left" -style {fg gray}
             if {[llength $args] == 0} {
 				set pkgs [${:pkgdbObj} list_installed]
