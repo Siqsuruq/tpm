@@ -1,5 +1,5 @@
 namespace eval tpm {
-    nx::Class create installer -mixin Helper {
+    nx::Class create installer  -mixin Helper {
         :property {pkgdbObj:object,required,type=pkgdb}
 
         :method init {} {
@@ -18,7 +18,7 @@ namespace eval tpm {
             set uuid [dict get $pkg uuid_pkg_version]
             set download_url "$base/download/package/$uuid"
 
-            :cputs_multi [list green "Downloading from: " blue "$download_url"]
+			echo "<s fg=green>Downloading from permalink: </s> <s fg=blue>$download_url</s>"
             set temp_file [file tempfile tmpfile "tpm_pkg_XXXXXX.zip"]
             # close $tmpfile
 
@@ -36,14 +36,12 @@ namespace eval tpm {
                 return
             }
 
-            if {[catch {
-                set install_dir [[::tpm::system new] get_install_path]
-            } path_err]} {
-                :cputs_multi [list red "✗ Unable to determine install location: " yellow "$path_err"]
+            if {[catch {set install_dir [[::tpm::system new] get_install_path]} path_err]} {
+				echo "<s fg=red>✗ Unable to determine install location: </s> <s fg=yellow>$path_err</s>"
                 file delete -force $temp_file
                 return
             }
-            :cputs_multi [list green "Installing to: " blue "$install_dir"]
+			echo "<s fg=green>Installing to: </s> <s fg=blue>$install_dir</s>"
             if {[catch {
                 # exec unzip -o $temp_file -d $install_dir
                 :extract_zip_to $temp_file $install_dir

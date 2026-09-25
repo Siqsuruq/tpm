@@ -1,0 +1,93 @@
+# Copyright (c) 2020 Petro Kazmirchuk https://github.com/Kazmirchuk
+
+# Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License. You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
+# Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the License for the specific language governing permissions and  limitations under the License.
+source test_utils.tcl
+
+set conn [nats::connection new]
+
+# access to a private method only for test purposes!
+test regex-1 "Check exact subjects" -body {
+    # these are valid
+    assert {[${conn}::my CheckSubject foo]}
+    assert {[${conn}::my CheckSubject FOO/.ba_r]}
+    assert {[${conn}::my CheckSubject foo#1.bAr2.ba-z]}
+    # JetStream uses subjects with $
+    assert {[${conn}::my CheckSubject "\$JS.API.STREAM.NAMES"]}
+    assert {[${conn}::my CheckSubject foo@.bAr=.ba(z)]}
+        
+    # these are invalid
+    assert {![${conn}::my CheckSubject ""]}
+    assert {![${conn}::my CheckSubject .]}
+    assert {![${conn}::my CheckSubject foo..bar]}
+    assert {![${conn}::my CheckSubject "foo. .bar"]}
+    assert {![${conn}::my CheckSubject "fOo. bar"]}
+    assert {![${conn}::my CheckSubject foo.*]}
+    assert {![${conn}::my CheckSubject foo.>]}
+}
+
+test regex-2 "Check subjects with wildcards" -body {
+    assert {[${conn}::my CheckSubject foo.* -wildcard]}
+    assert {[${conn}::my CheckSubject foo.bar -wildcard]}
+    assert {[${conn}::my CheckSubject foo -wildcard]}
+    assert {[${conn}::my CheckSubject foo.> -wildcard]}
+    assert {[${conn}::my CheckSubject *.foo.* -wildcard]}
+    # invalid wildcards
+    assert {![${conn}::my CheckSubject "" -wildcard]}
+    assert {![${conn}::my CheckSubject foo* -wildcard]}
+    assert {![${conn}::my CheckSubject foo> -wildcard]}
+    assert {![${conn}::my CheckSubject foo.*bar -wildcard]}
+    assert {![${conn}::my CheckSubject *foo.* -wildcard]}
+}
+
+
+# seems like capture groups are broken in Tcl:
+# regexp -expanded {^_INBOX\.([[:alnum:]]+)$} _INBOX.abcABCabbbsdf -> v
+# v=abcABC123a
+# so I just split the inbox to get the generated part
+test regex-3 "Check inbox generation" -body {
+    for {set i 0} {$i < 10000} {incr i} {
+        set inbox [$conn inbox]
+        assert {[string length $inbox] == 29}
+        assert {[regexp {^_INBOX\.[[:alnum:]]+$} $inbox]}
+        
+        set random_portion [lindex [split $inbox .] 1]
+        foreach char [split $random_portion ""] {
+            if {[info exists char_stats($char)]} {
+                incr char_stats($char)
+            } else {
+                set char_stats($char) 1
+            }
+        }
+    }
+    # check that each character A-Za-z0-9 occurs at least 100 times
+    assert {[array size char_stats] == 26*2+10}
+    foreach char [array names char_stats] {
+        assert {$char_stats($char) > 100}
+    }
+}
+
+test regex-4 "Check stream names" -body {
+    set js [$conn jet_stream]
+    # these are valid
+    assert {[${js}::my CheckFilenameSafe foo@]}
+    assert {[${js}::my CheckFilenameSafe FOO_123]}
+    assert {[${js}::my CheckFilenameSafe foo#-z_D2]}
+    # these are invalid
+    assert {![${js}::my CheckFilenameSafe foo/bar]}
+    assert {![${js}::my CheckFilenameSafe foo\\bar]}
+    assert {![${js}::my CheckFilenameSafe foo.bar]}
+}
+
+test regex-5 "Check queue groups" -body {
+    # these are valid
+    assert {[${conn}::my CheckSubject foo@-123 -queue]}
+    assert {[${conn}::my CheckSubject foo_+bar -queue]}
+    assert {[${conn}::my CheckSubject 78&foo -queue]}
+    # these are invalid
+    assert {![${conn}::my CheckSubject foo.* -queue]}
+    assert {![${conn}::my CheckSubject foo.> -queue]}
+    assert {![${conn}::my CheckSubject *foo -queue]}
+}
+
+cleanupTests

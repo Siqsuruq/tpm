@@ -5,71 +5,97 @@ namespace eval tpm {
         :object property {tpm_version ""}
         :object property {tpm_path:substdefault {[file dirname [file normalize [info script]]]}}
         :object property {config_path ""}
+        :object property {install_path ""}
 
         :public object method init {} {
             set :config_path [file join ${:basedir} var config.ini]
             :read_config
-            :libs_path
+            :init_package_paths
+			:init_custom_package_path
         }
 
         :object method read_config {} {
+            set f ""
             try {
                 set f [::ini::open ${:config_path} r]
                 set :default_repo_url [::ini::value $f "repository" "default_repo_url"]
                 set :tpm_version [::ini::value $f "tpm" "version"]
-                ::ini::close $f
+                set :install_path [::ini::value $f "custom_packages" "install_path"]
             } on error {errMsg} {
                 puts "Failed to load config: $errMsg"
-            }
-        }
-
-        :object method libs_path {} {
-            # Construct the full local tpm libs path to remove
-            set remove_path [file normalize [file join ${:tpm_path} libs]]
-            # Rebuild ::auto_path without the remove_path
-            set filtered_auto_path {}
-            foreach path $::auto_path {
-                if {[file normalize $path] ne $remove_path} {
-                    lappend filtered_auto_path $path
+            } finally {
+                if {$f ne ""} {
+                    catch {::ini::close $f}
                 }
             }
-            # Full candidate list (excluding tpm's own libs/) used when choosing
-            # an install destination. Unlike libsdirs this keeps subdirectories,
-            # because the per-package dirs are exactly the writable targets.
+        }
+		
+		:object method init_custom_package_path {} {
+			set path [string trim ${:install_path}]
+			if {$path eq ""} {
+				return
+			}
+			set path [file normalize $path]
+			set :install_path $path
+			# Make custom-installed packages visible to Tcl itself.
+			if {[lsearch -exact $::auto_path $path] == -1} {
+				lappend ::auto_path $path
+			}
+		}
+
+        :object method init_package_paths {} {
+            set libs_root [file normalize [file join ${:tpm_path} libs]]
+            set filtered_auto_path {}
+            foreach path $::auto_path {
+                if {[:is_subpath $path $libs_root]} {
+                    continue
+                }
+                lappend filtered_auto_path $path
+            }
+            # Original Tcl package paths, excluding TPM's private libs.
             set ::tpm::autopaths $filtered_auto_path
+            # Top-level Tcl library roots.
             set ::tpm::libsdirs [:get_top_level_paths $filtered_auto_path]
         }
 
-        # Function to filter only top-level libs paths from auto_path
+        :object method is_subpath {path parent} {
+            set path   [file normalize $path]
+            set parent [file normalize $parent]
+            set pathParts   [file split $path]
+            set parentParts [file split $parent]
+            if {[llength $pathParts] < [llength $parentParts]} {
+                return 0
+            }
+            set candidate [lrange $pathParts 0 [expr {[llength $parentParts] - 1}]]
+            # Windows paths are case-insensitive.
+            if {$::tcl_platform(platform) eq "windows"} {
+                return [string equal -nocase [file join {*}$candidate] [file join {*}$parentParts]]
+            }
+            return [expr {$candidate eq $parentParts}]
+        }
+
         :object method get_top_level_paths {paths} {
             set topLevels {}
             foreach path $paths {
                 set isSubfolder 0
                 foreach other $paths {
-                    if {$path eq $other} continue
-                    # Normalize both paths to compare cleanly
-                    set normPath   [file normalize $path]
-                    set normOther  [file normalize $other]
-                    if {[string match "${normOther}/*" $normPath]} {
+                    if {$path eq $other} {
+                        continue
+                    }
+                    #
+                    # If $path lives under $other, it is not a top-level root.
+                    #
+                    if {[:is_subpath $path $other]} {
                         set isSubfolder 1
                         break
                     }
                 }
+
                 if {!$isSubfolder} {
                     lappend topLevels $path
                 }
             }
             return $topLevels
-        }
-
-        :public object method save {} {
-            set f [open ${:config_path} w]
-            puts $f "# tpm config"
-            foreach name [info object variables] {
-                if {$name eq "config_path"} continue
-                puts $f "$name=[set :$name]"
-            }
-            close $f
         }
     }
 }

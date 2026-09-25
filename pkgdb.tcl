@@ -1,7 +1,10 @@
 namespace eval tpm {
-    nx::Class create pkgdb -mixin Helper {
-        :property {installed_pkgs ""}
-        :property {available_pkgs ""}
+    nx::Class create pkgdb {
+		# Raw Tcl package registrations discovered by pkgParser.
+		:property {provided_pkgs ""}
+		# Physical installed package/distribution units.
+		:property {installed_pkgs ""}
+		:property {available_pkgs ""}
 
         :method init {} {
             :refresh
@@ -90,31 +93,136 @@ namespace eval tpm {
             return $updates
         }
 
-        :public method refresh {} {
-            set :installed_pkgs {} ;# reset
-            set base_dir [file normalize [file dirname [info script]]]
-            
-            set pkgParserObj [::tpm::pkgParser new -pkgDirs $::tpm::libsdirs]
-            set :installed_pkgs [$pkgParserObj get_packages]
-        }
+		:public method refresh {} {
+		    set :provided_pkgs {}
+			set :installed_pkgs {}
+			set systemObj [::tpm::system create]
+			set pkgDirs [$systemObj get_package_paths]
+			set pkgParserObj [::tpm::pkgParser new -pkgDirs $pkgDirs]
+			try {
+				set :provided_pkgs [$pkgParserObj get_packages]
+			} finally {
+				$pkgParserObj destroy
+			}
+			:group_installed_packages
+			return ${:installed_pkgs}
+		}
+		
+		:method group_installed_packages {} {
+			set groups [dict create]
+			# Group raw Tcl packages by physical directory.
+			foreach pkg ${:provided_pkgs} {
+				set path [file normalize [dict get $pkg path]]
+				dict lappend groups $path $pkg
+			}
+			set installed {}
+			dict for {path provides} $groups {
+				set name [:infer_unit_name $path $provides]
+				set version [:infer_unit_version $name $provides]
+				set provided_names {}
+				set indexes {}
+				set types {}
+				foreach pkg $provides {
+					set pkgName [dict get $pkg name]
+					set index [dict get $pkg indx]
+					set type [dict get $pkg type]
+					if {[lsearch -exact $provided_names $pkgName] == -1} {
+						lappend provided_names $pkgName
+					}
+					if {[lsearch -exact $indexes $index] == -1} {
+						lappend indexes $index
+					}
+					if {[lsearch -exact $types $type] == -1} {
+						lappend types $type
+					}
+				}
+				lappend installed [dict create name $name version $version path $path provided_names $provided_names provided_count [llength $provided_names] provides $provides indexes $indexes types $types]
+			}
+			set :installed_pkgs $installed
+		}
+
+		:method infer_unit_name {path provides} {
+			set dirname [file tail [file normalize $path]]
+			# First try an exact case-sensitive prefix.
+			set best ""
+			foreach pkg $provides {
+				set name [dict get $pkg name]
+				if {[string first $name $dirname] == 0} {
+					if {[string length $name] > [string length $best]} {
+						set best $name
+					}
+				}
+			}
+			if {$best ne ""} {
+				return $best
+			}
+			# Then try case-insensitive matching.
+			set lowerDir [string tolower $dirname]
+			foreach pkg $provides {
+				set name [dict get $pkg name]
+				if {[string first [string tolower $name] $lowerDir] == 0} {
+					if {[string length $name] > [string length $best]} {
+						set best $name
+					}
+				}
+			}
+			if {$best ne ""} {
+				return $best
+			}
+			# Fallback: first provided package.
+			return [dict get [lindex $provides 0] name]
+		}
+
+		:method infer_unit_version {name provides} {
+			# Exact package-name match.
+			foreach pkg $provides {
+				if {[dict get $pkg name] eq $name} {
+					return [dict get $pkg version]
+				}
+			}
+			# Case-insensitive fallback.
+			foreach pkg $provides {
+				if {[string equal -nocase [dict get $pkg name] $name]} {
+					return [dict get $pkg version]
+				}
+			}
+			# If everything provides the same version, that's safe too.
+			set versions {}
+			foreach pkg $provides {
+				set version [dict get $pkg version]
+				if {[lsearch -exact $versions $version] == -1} {
+					lappend versions $version
+				}
+			}
+			if {[llength $versions] == 1} {
+				return [lindex $versions 0]
+			}
+			# Cannot safely infer a distribution version.
+			return ""
+		}
+
+		:public method find_installed_unit {name} {
+			foreach unit ${:installed_pkgs} {
+				# Main distribution name.
+				if {[dict get $unit name] eq $name} {
+					return $unit
+				}
+				# One of the Tcl packages provided by this distribution.
+				if {[lsearch -exact [dict get $unit provided_names] $name] != -1} {
+					return $unit
+				}
+			}
+			return ""
+		}
 
         :public method list_installed {} {
-            if {[llength ${:installed_pkgs}] == 0} {
-                return ""
-            } else {
-				return ${:installed_pkgs}
-            }
-        }
+			return ${:installed_pkgs}
+		}
 
         :public method is_installed {pkg} {
-            foreach pkgDict ${:installed_pkgs} {
-                if {[dict getnull $pkgDict name] eq $pkg} {
-                    return 1
-                }
-            }
-            return 0
-        }
-
+			return [expr {[:find_installed_unit $pkg] ne ""}]
+		}
+		
         :public method get_installed_packages_by_name {pkg} {
             set result {}
             # puts "Searching for installed packages named '$pkg'... ${:installed_pkgs}"

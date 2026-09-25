@@ -1,0 +1,361 @@
+# Copyright (c) 2020 Petro Kazmirchuk https://github.com/Kazmirchuk
+# Copyright (c) 2021 ANT Solutions https://antsolutions.eu/
+
+# Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License. You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
+# Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the License for the specific language governing permissions and  limitations under the License.
+
+# all *.test files source this file first
+
+if {[namespace exists test_utils]} {
+    # avoid sourcing this file multiple times when using -singleproc 1
+    return
+}
+
+package require nats  ;# if not found, add it to TCLLIBPATH
+package require tcltest 2.5
+package require tcl::transform::observe
+package require tcl::chan::variable
+package require Thread
+package require lambda
+
+if {$tcl_platform(platform) eq "windows"} {
+    package require twapi_process
+}
+
+set ::inMsg ""
+
+namespace eval test_utils {
+    variable sleepVar 0
+    variable natsPid
+    
+    # Tcllib's logger breaks the Komodo's debugger
+    namespace eval log {
+        proc info {msg} {
+            puts [tcltest::outputChannel] "\[[nats::timestamp] test_utils info\] $msg"
+        }
+    }
+    # how it was supposed to be...
+    #logger::initNamespace [namespace current] info  ;# the logging level can be changed to debug, warn etc
+    #set appenderArgs [list -outputChannel [tcltest::outputChannel]]
+    #lappend appenderArgs -conversionPattern {\[[nats::timestamp] %c %p\] %m}
+    #logger::utils::applyAppender -appender fileAppend -service test_utils -appenderArgs $appenderArgs
+    #unset appenderArgs
+    
+    # sleep $delay ms in the event loop
+    proc sleep {delay} {
+        after $delay {set ::test_utils::sleepVar 1}
+        vwait ::test_utils::sleepVar
+    }
+
+    proc wait_for {var {timeout 300}} {
+        set timer [after $timeout [list set $var "test_utils_timeout"]]
+        vwait $var
+        if {[set $var] eq "test_utils_timeout"} {
+            return -code error "Timeout on $var"
+        } else {
+            after cancel $timer
+        }
+        return [set $var]
+    }
+    
+    proc wait_flush {conn} {
+        vwait ${conn}::timers(flush) ;# wait until Flusher executes
+    }
+    
+    # [time] returns microseconds, while I need milliseconds
+    proc duration {script varName} {
+        upvar 1 $varName elapsed
+        set now [clock millis]
+        # trying to manipulate the error stack to hide duration+uplevel is too much hassle, so just let it propagate
+        uplevel 1 $script
+        set elapsed [expr {[clock millis] - $now}]
+    }
+    
+    proc sniffer {connection script readVar writtenVar args} {
+        nats::_parse_args $args {
+            all_lines bool false
+            filter_ping bool true
+        }
+        set ns [info object namespace $connection]
+        upvar 1 $readVar r_link
+        upvar 1 $writtenVar w_link
+        upvar 1 ${ns}::sock chanHandle
+        
+        # tcl::chan::variable can't work with local variables
+        # and it requires explicit namespace qualifiers
+        set readChan [tcl::chan::variable ::test_utils::readData]
+        chan configure $readChan -translation binary
+        set writeChan [tcl::chan::variable ::test_utils::writtenData]
+        chan configure $writeChan -translation binary
+        
+        if {$chanHandle eq ""} {
+            # the socket hasn't been created yet
+            trace add variable ${ns}::sock write [lambda { writeChan readChan var idx op} {
+                upvar 1 $var chanHandle
+                if {$chanHandle ne ""} {
+                    tcl::transform::observe $chanHandle $writeChan $readChan
+                }
+            } $writeChan $readChan]
+        } else {
+            tcl::transform::observe $chanHandle $writeChan $readChan
+        }
+        try {
+            uplevel 1 $script
+        } finally {
+            if {[chan names $chanHandle] ne ""} {
+                # workaround for this bug https://core.tcl-lang.org/tcl/tktview/ea69b0258a9833cb61ada42d1fc742d90aec04d0
+                update
+                # if the socket hasn't been closed yet, remove the transformation
+                chan pop $chanHandle
+            }
+            close $writeChan
+            close $readChan
+            foreach traceInfo [trace info variable ${ns}::sock] {
+                # remove our trace, if any
+                lassign $traceInfo op cmd
+                if {$op eq "write"} {
+                    trace remove variable ${ns}::sock write $cmd
+                }
+            }
+            set r_link $::test_utils::readData
+            set w_link $::test_utils::writtenData
+            unset ::test_utils::readData
+            unset ::test_utils::writtenData
+        }
+        set r_link [SnifferBinToList $r_link $all_lines $filter_ping true]
+        set w_link [SnifferBinToList $w_link $all_lines $filter_ping false]
+        return
+    }
+        
+    # private proc: convert raw data sent through socket into a list of NATS protocol tokens
+    proc SnifferBinToList {binData all_lines filter_ping filter_info} {
+        # NATS uses \r\n as a protocol delimiter
+        # [split] supports splitting only by a single character, so at first replace \r\n with plain \n
+        # and since binData ends with \r\n, resulting list will have 1 empty element in the end - discard it
+        set result [lrange [split [string map {\r\n \n} $binData] \n] 0 end-1]
+        #set result [string map {\r\n \n} $binData]
+        if {$filter_ping} {
+            # usually we are not interested in PING/PONG
+            set result [lmap e $result {
+                if {$e eq "PING" || $e eq "PONG"} continue
+                set e
+            }]
+        }
+        if {$all_lines} {
+            if {$filter_info} {
+                set result [lmap e $result {
+                    if {[string match INFO* $e]} continue
+                    set e
+                }]
+            }
+            return $result
+        }
+        # usually we are interested only in the first line of sniffed data
+        return [lindex $result 0]
+    }
+    proc getConnectOpts {data} {
+        set pos [string first " " $data] ;# skip CONNECT straight to the beginning of JSON
+        return [json::json2dict [string range $data $pos+1 end]]
+    }
+    proc subCallback {subj msg reply} {
+        set ::inMsg $msg
+    }
+
+    proc asyncReqCallback {timedOut msg} {
+        if {$timedOut} {
+            set ::inMsg "timeout"
+        } else {
+            set ::inMsg $msg
+        }
+    }
+    proc errorTrace {var idx op } {
+        upvar 1 $var e
+        if {$e ne ""} {
+            lappend ::allErrors [lindex [dict get $e code] 1]
+        }
+    }
+    # start NATS server in the background; it must be available in $PATH
+    proc startNats {id args} {
+        #if {$id eq "NATS"} {
+        #    if {![NeedStartNats $args]} {
+        #        return
+        #    }
+        #}
+        variable natsPid
+        # NATS ignores --store_dir if JS is not enabled
+        lappend args --store_dir [file join [tcltest::temporaryDirectory] $id]
+        # tcltest -singleproc 0 considers stderr from NATS as a test failure; we don't need these logs, so just send them to /dev/null
+        # Tcllib's processman package doesn't offer much value
+        if {$::tcl_platform(platform) eq "windows"} {
+            set natsPid($id) [exec nats-server.exe {*}$args 2> NUL &]
+        } else {
+            set natsPid($id) [exec nats-server {*}$args 2> /dev/null &]
+        }
+        sleep 500
+        log::info "Started $id $args"
+    }
+    
+    proc stopNats {id} {
+        variable natsPid
+        if {![info exists natsPid($id)]} {
+            return
+        }
+        if {$::tcl_platform(platform) eq "windows"} {
+            # Note: this is NOT a graceful shutdown - that is possible with Ctrl+C in the NATS console
+            # I tried nats-server.exe --signal stop=PID, but it requires NATS to run as a Windows service
+            twapi::end_process $natsPid($id)
+        } else {
+            exec kill $natsPid($id)
+        }
+        unset natsPid($id)
+        after 500 ;# deliberately don't process events
+        log::info "Stopped $id"
+    }
+    # suitable only for tests that start only one NATS instance
+    proc NeedStartNats {natsArgs} {
+        if {$::tcl_platform(platform) eq "windows"} {
+            set count [llength [twapi::get_process_ids -name nats-server.exe]]
+        } else {
+            try {
+                set count [exec pgrep --exact --count nats-server]
+            } trap {CHILDSTATUS} {err opts} {
+                set count 0 ;# somewhat inconvenient that pgrep exits with $?=1 when nothing matched
+            }
+        }
+        return [expr {!$count}] ;# useful for troubleshooting: allow manually started nats-server -DV
+    }
+    
+    proc execNatsCmd {args} {
+        set output [exec -ignorestderr nats {*}$args]
+        log::info "Executed: nats $args"
+        return $output
+    }
+    
+    oo::class create responder {
+        variable responderThread id
+        
+        constructor {args} {
+            nats::_parse_args $args {
+                subject valid_str service
+                queue valid_str ""
+                servers valid_str ""
+            }
+            set id [namespace tail [self]]
+
+            set thread_script {
+                source responder.tcl
+                thread::wait
+                responder::shutdown
+            }
+            
+            set responderThread [thread::create -joinable -preserved $thread_script]
+            # return value of thread::send is the same as [catch]
+            if {[thread::send $responderThread [list responder::init $id $subject $queue $servers] result] == 1} {
+                error "Failed to initialise responder $id: $result"
+            }
+            set log_msg "Responder $id listening on $subject"
+            if {$queue ne ""} {
+                append log_msg " queue: $queue"
+            }
+            test_utils::log::info $log_msg
+            # no need in thread::errorproc - if there's an unexpected error in the thread, it will be logged to stderr by itself
+        }
+        destructor {
+            thread::release $responderThread ;# makes the thread return from thread::wait
+            thread::join $responderThread
+            test_utils::log::info "Responder $id finished"
+        }
+        method reply_count {} {
+            if {[thread::send $responderThread {set ::responder::reply_count} result] == 1} {
+                error "Failed to get reply count: $result"
+            }
+            return $result
+        }
+    }
+    
+    proc stopAllResponders {} {
+        foreach r [info class instances ::test_utils::responder] {
+            $r destroy
+        }
+    }
+
+    proc assert {expression} {
+        set res [uplevel 1 [list expr $expression]]
+        if {$res} return
+        return -code error "assertion failed: [uplevel 1 [list subst $expression]]"
+    }
+    # for nats::connection and nats::ordered_consumer
+    proc lastError {obj {errVar ""}} {
+        set ns [info object namespace $obj]
+        set lastError [set ${ns}::last_error]
+        if {$lastError eq ""} {
+            return ""
+        }
+        set errCode [lindex [dict get $lastError code] 1]
+        if {$errVar ne ""} {
+            upvar 1 $errVar errMsg
+            set errMsg [dict get $lastError errorMessage]
+        }
+        return $errCode
+    }
+    
+    #check that actual == ref within certain tolerance - useful for timers/duration
+    proc approx {actual ref {tolerance 50}} {
+        if {$actual > ($ref - $tolerance) && $actual < ($ref + $tolerance)} {
+            return
+        }
+        return -code error "approx failed: actual $actual ref $ref tolerance $tolerance"
+    }
+    
+    # check that dict1 is a subset of dict2, with the same values
+    proc dict_in {dict1 dict2} {
+        dict for {k v} $dict1 {
+            if {[dict exists $dict2 $k] && [dict get $dict2 $k] == $v} {
+                continue
+            } else {
+                log::info "$k = $v does not match with dict2"
+                return false
+            }
+        }
+        return true
+    }
+    
+    # replace/delete data passed through the channel using [string map]
+    proc intercept {conn read_mapping write_mapping} {
+        set ns [info object namespace $conn]
+        set channel [set ${ns}::sock]
+        chan push $channel [interceptor new $read_mapping $write_mapping]
+        # the interceptor object will be automatically deleted when the socket is closed
+    }
+    
+    oo::class create interceptor {
+        superclass tcl::transform::core
+        variable read_map
+        variable write_map
+        
+        constructor {read_mapping write_mapping} {
+            set read_map $read_mapping
+            set write_map $write_mapping
+        }
+        method write {c data} {
+            return [string map $write_map $data]
+        }
+        method read {c data} {
+            return [string map $read_map $data]
+        }
+    }
+    # can't use tcltest::cleanupTestsHook because it behaves differently depending on -singleproc:
+    # with -singleproc 1, cleanupTestsHook is called by tcltest::cleanupTests every time, so at the end of every *.test file, which is what you'd expect
+    # with -singleproc 0, cleanupTestsHook is called only after *all* tests are done, which is not useful for me
+    proc cleanupTests {} {
+        # ensure each test starts with an empty JetStream
+        file delete -force [tcltest::temporaryDirectory]
+        tcltest::cleanupTests
+    }
+    namespace export {[a-z]*}
+}
+
+namespace import ::tcltest::test
+namespace import test_utils::*
+
+# execution continues in a *.test file... no need to call tcltest::configure there again

@@ -8,19 +8,18 @@ namespace eval tpm {
         }
 
         :public method start {} {
-        set v [::tpm::config cget -tpm_version]
-        set bb [zesty::box \
-            -title {name "TPM - Tcl Package Manager" anchor "nw"} \
-            -content {text "<s fg=green>Welcome to tpm (NX version) Version: $v</s>\n \
-            <s fg=green>Type </s><s fg=blue>'help'</s><s fg=green> for commands. Type  </s><s fg=blue>'exit'</s><s fg=green> to quit</s> \n \
-            <s fg=green>Repository: </s><s fg=blue>[::tpm::config cget -default_repo_url]</s>"} \
-            -box {size {300 5}} \
-            -paddingX 1 \
-            -paddingY 0
-        ]
+			set bb [zesty::box \
+				-title {name "TPM - Tcl Package Manager" anchor "nw"} \
+				-content [subst {text "<s fg=green>Welcome to tpm (NX version) Version: [::tpm::config cget -tpm_version]</s>\n \
+				<s fg=green>Type </s><s fg=blue>'help'</s><s fg=green> for commands. Type  </s><s fg=blue>'exit'</s><s fg=green> to quit</s> \n \
+				<s fg=green>Repository: </s><s fg=blue>[::tpm::config cget -default_repo_url]</s>"}] \
+				-box {size {300 5}} \
+				-paddingX 1 \
+				-paddingY 0
+			]
+			zesty::echo $bb
+			echo "_________________________________________________________________________________________________________" -style {fg red bold 1}
 
-        zesty::echo $bb
-            :cputs red "------------------------------------------------------"
 
             while {1} {
                 puts -nonewline "> "
@@ -51,8 +50,6 @@ namespace eval tpm {
                     :list_updates
                 }
                 system {
-                    :cputs green "System information:"
-                    :cputs red "------------------------------------------------------"
                     ${:sysObj} print_summary
                 }
                 install {
@@ -79,37 +76,35 @@ namespace eval tpm {
             }
         }
 
-        :method list_local {args} {
-            :cputs green "Locally installed packages:"
-            :cputs red "------------------------------------------------------"
+		:method list_local {args} {
+			:cputs green "Locally installed packages:"
+			:cputs red "------------------------------------------------------"
 			set table [zesty::Table new -box {type "rounded"}]
-            $table addColumn -name "Package" -width 40 -style {fg yellow}
+			$table addColumn -name "Package" -width 30 -style {fg yellow}
 			$table addColumn -name "Version" -width 10 -style {fg green}
-			$table addColumn -name "Path" -width 50 -style {fg cyan}
-            $table addColumn -name "Type" -justify "left" -style {fg gray}
-            if {[llength $args] == 0} {
+			$table addColumn -name "Path" -width 60 -style {fg cyan}
+			$table addColumn -name "Provides" -justify "left" -style {fg gray}
+			if {[llength $args] == 0} {
 				set pkgs [${:pkgdbObj} list_installed]
-				if {$pkgs ne ""} {
+				if {[llength $pkgs] > 0} {
 					foreach pkgDict $pkgs {
-						$table addRow "[dict get $pkgDict name]" "[dict get $pkgDict version]" "[dict get $pkgDict path]" "[dict get $pkgDict type]"
+						$table addRow [dict get $pkgDict name] [dict get $pkgDict version] [dict get $pkgDict path] [dict get $pkgDict provided_count]
 					}
 				} else {
-					$table addRow "<s fg=red>There is no packages installed.</s>" "" "" ""
+					$table addRow "<s fg=red>There are no packages installed.</s>" "" "" ""
 				}
-            } else {
-                foreach pkg $args {
-                    if {[${:pkgdbObj} is_installed $pkg]} {
-                        set versions [${:pkgdbObj} get_installed_packages_by_name $pkg]
-                        foreach pkgDict $versions {
-							$table addRow "[dict get $pkgDict name]" "[dict get $pkgDict version]" "[dict get $pkgDict path]" "[dict get $pkgDict type]"
-                        }
-                    } else {
+			} else {
+				foreach pkg $args {
+					set unit [${:pkgdbObj} find_installed_unit $pkg]
+					if {$unit ne ""} {
+						$table addRow [dict get $unit name] [dict get $unit version] [dict get $unit path] [dict get $unit provided_count]
+					} else {
 						$table addRow "$pkg <s fg=red>is not installed.</s>" "" "" ""
-                    }
-                }
-            }
+					}
+				}
+			}
 			$table display
-        }
+		}
 
         :public method list_remote {} {
             try {
@@ -185,7 +180,7 @@ namespace eval tpm {
 				{"exit" "Exit the package manager"}
 			}
 
-			zesty::echo [zesty::box -title {name "Help" anchor "nw" style {fg 159}} -box {style {bold 1 fg gray}} \
+			zesty::echo [zesty::box -title {name "Help" anchor "nw" style {fg 159}} -box {type "rounded"} \
 				-content [list text $data \
 					table {
 						enabled "true"
