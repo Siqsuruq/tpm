@@ -99,5 +99,51 @@ namespace eval tpm {
                 :cputs_multi [list green "Package " yellow "$pkgName" green " uninstalled successfully."]
             }
         }
+
+        :method save_manifest {manifest} {
+            set dir [${:pkgdbObj} get_manifest_dir]
+            if {![file isdirectory $dir]} {
+                file mkdir $dir
+            }
+            set uuid [dict get $manifest uuid_pkg_version]
+            set path [file join $dir "${uuid}.tpm"]
+            set f [open $path w]
+            try {
+                puts $f $manifest
+            } finally {
+                close $f
+            }
+            return $path
+        }
+
+        :method validate_archive_paths {entries install_root} {
+            set install_root [file normalize $install_root]
+            foreach entry $entries {
+                # Archive entries must always be relative.
+                if {[file pathtype $entry] ne "relative"} {
+                    error "Unsafe absolute path in package archive: $entry"
+                }
+                # Explicit parent traversal is never permitted.
+                if {[lsearch -exact [file split $entry] ".."] != -1} {
+                    error "Unsafe parent path in package archive: $entry"
+                }
+                set destination [file normalize [file join $install_root $entry]]
+                # Additional normalized containment test.
+                set rootParts [file split $install_root]
+                set dstParts  [file split $destination]
+                if {[llength $dstParts] < [llength $rootParts]} {
+                    error "Unsafe package archive path: $entry"
+                }
+                set candidate [lrange $dstParts 0 [expr {[llength $rootParts] - 1}]]
+                if {$::tcl_platform(platform) eq "windows"} {
+                    set inside [string equal -nocase [file join {*}$candidate] [file join {*}$rootParts]]
+                } else {
+                    set inside [expr {$candidate eq $rootParts}]
+                }
+                if {!$inside} {
+                    error "Package archive path escapes installation directory: $entry"
+                }
+            }
+        }
     }
 }

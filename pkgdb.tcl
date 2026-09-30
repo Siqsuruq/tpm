@@ -110,34 +110,58 @@ namespace eval tpm {
 		
 		:method group_installed_packages {} {
 			set groups [dict create]
-			# Group raw Tcl packages by physical directory.
+			set group_paths [dict create]
+			set group_types [dict create]
+			# Group raw Tcl package registrations into physical installation units.
 			foreach pkg ${:provided_pkgs} {
-				set path [file normalize [dict get $pkg path]]
-				dict lappend groups $path $pkg
+				set type [dict get $pkg type]
+				switch -- $type {
+					tm {
+						# A Tcl Module is itself the installation unit.
+						set unit_path [file normalize [dict get $pkg indx]]
+					}
+					default {
+						# A pkgIndex-based package normally owns its directory.
+						set unit_path [file normalize [dict get $pkg path]]
+					}
+				}
+				set key [list $type $unit_path]
+				dict lappend groups $key $pkg
+				dict set group_paths $key $unit_path
+				dict set group_types $key $type
 			}
+			set manifests [:load_manifests]
 			set installed {}
-			dict for {path provides} $groups {
+			dict for {key provides} $groups {
+				set path [dict get $group_paths $key]
+				set type [dict get $group_types $key]
 				set name [:infer_unit_name $path $provides]
 				set version [:infer_unit_version $name $provides]
 				set provided_names {}
 				set indexes {}
-				set types {}
 				foreach pkg $provides {
 					set pkgName [dict get $pkg name]
 					set index [dict get $pkg indx]
-					set type [dict get $pkg type]
 					if {[lsearch -exact $provided_names $pkgName] == -1} {
 						lappend provided_names $pkgName
 					}
 					if {[lsearch -exact $indexes $index] == -1} {
 						lappend indexes $index
 					}
-					if {[lsearch -exact $types $type] == -1} {
-						lappend types $type
-					}
 				}
-				lappend installed [dict create name $name version $version path $path provided_names $provided_names provided_count [llength $provided_names] provides $provides indexes $indexes types $types]
+				# Determine whether TPM owns this installation.
+				set manifest [:find_manifest_for_path $path $manifests]
+				set managed 0
+				set manifest_file ""
+				if {$manifest ne ""} {
+					set managed 1
+					set manifest_file [dict get $manifest manifest_file]
+				}
+				lappend installed [dict create name $name version $version path $path type $type managed $managed \
+					manifest_file $manifest_file manifest $manifest provided_names $provided_names \
+					provided_count [llength $provided_names] provides $provides indexes $indexes]
 			}
+
 			set :installed_pkgs $installed
 		}
 
@@ -169,8 +193,13 @@ namespace eval tpm {
 			if {$best ne ""} {
 				return $best
 			}
-			# Fallback: first provided package.
-			return [dict get [lindex $provides 0] name]
+			# No provided package clearly identifies the distribution.
+			# Use the physical installation name rather than arbitrarily picking the first Tcl package.
+			set physical [file tail [file normalize $path]]
+			if {[string match *.tm $physical]} {
+				set physical [file rootname $physical]
+			}
+			return $physical
 		}
 
 		:method infer_unit_version {name provides} {
@@ -202,17 +231,22 @@ namespace eval tpm {
 		}
 
 		:public method find_installed_unit {name} {
+			set best ""
 			foreach unit ${:installed_pkgs} {
-				# Main distribution name.
+				# Exact installation-unit name always wins.
 				if {[dict get $unit name] eq $name} {
 					return $unit
 				}
-				# One of the Tcl packages provided by this distribution.
-				if {[lsearch -exact [dict get $unit provided_names] $name] != -1} {
-					return $unit
+				# Package is provided by this unit.
+				if {[lsearch -exact [dict get $unit provided_names] $name] == -1} {
+					continue
+				}
+				# Prefer the most specific/deepest installation path.
+				if {$best eq "" || [string length [dict get $unit path]] > [string length [dict get $best path]]} {
+					set best $unit
 				}
 			}
-			return ""
+			return $best
 		}
 
         :public method list_installed {} {
@@ -233,5 +267,60 @@ namespace eval tpm {
             }
             return $result
         }
+
+        :public method get_manifest_dir {} {
+			return [file join [::tpm::config cget -tpm_path] var installed]
+		}
+
+		:method load_manifests {} {
+			set result {}
+			set dir [:get_manifest_dir]
+			if {![file isdirectory $dir]} {
+				return $result
+			}
+			foreach path [glob -nocomplain -types f -directory $dir *.tpm] {
+				set f [open $path r]
+				try {
+					set data [string trim [read $f]]
+				} finally {
+					close $f
+				}
+				if {$data eq ""} {
+					continue
+				}
+				# Manifest is stored as a Tcl dictionary, not executable Tcl.
+				if {[catch {dict size $data}]} {
+					continue
+				}
+				dict set data manifest_file $path
+				lappend result $data
+			}
+			return $result
+		}
+
+		:method paths_equal {a b} {
+			set a [file normalize $a]
+			set b [file normalize $b]
+			if {$::tcl_platform(platform) eq "windows"} {
+				return [string equal -nocase $a $b]
+			}
+			return [expr {$a eq $b}]
+		}
+
+		:method find_manifest_for_path {path manifests} {
+			foreach manifest $manifests {
+				if {![dict exists $manifest unit_path]} {
+					continue
+				}
+				set unit_path [dict get $manifest unit_path]
+				if {$unit_path eq ""} {
+					continue
+				}
+				if {[:paths_equal $path $unit_path]} {
+					return $manifest
+				}
+			}
+			return ""
+		}
     }
 }

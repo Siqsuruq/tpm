@@ -143,5 +143,61 @@ namespace eval tpm {
         :public method get_tcl_version_minor {} {
             return [lindex [split $::tcl_version "."] 1]
         }
+
+        :method paths_equal {a b} {
+            set a [file normalize $a]
+            set b [file normalize $b]
+            if {$::tcl_platform(platform) eq "windows"} {
+                return [string equal -nocase $a $b]
+            }
+            return [expr {$a eq $b}]
+        }
+
+        :method is_subpath {path parent} {
+            set path   [file normalize $path]
+            set parent [file normalize $parent]
+            set pathParts   [file split $path]
+            set parentParts [file split $parent]
+            if {[llength $pathParts] < [llength $parentParts]} {
+                return 0
+            }
+            set candidate [lrange $pathParts 0 [expr {[llength $parentParts] - 1}]]
+
+            if {$::tcl_platform(platform) eq "windows"} {
+                return [string equal -nocase [file join {*}$candidate] [file join {*}$parentParts]]
+            }
+            return [expr {$candidate eq $parentParts}]
+        }
+
+        :public method is_protected_package_path {path} {
+            # ZIPFS is part of Tcl itself and is not a normal removable filesystem package location.
+            if {[string match {//zipfs:*} $path]} {
+                return 1
+            }
+            set path [file normalize $path]
+            # Never allow deletion of TPM's own dependencies.
+            set tpm_libs [file normalize [file join [::tpm::config cget -tpm_path] libs]]
+            if {[:is_subpath $path $tpm_libs]} {
+                return 1
+            }
+            # Protect Tcl's own library tree.
+            if {![string match {//zipfs:*} $::tcl_library]} {
+                set tcl_library [file normalize $::tcl_library]
+                if {[:is_subpath $path $tcl_library]} {
+                    return 1
+                }
+            }
+            # Never force-delete an entire package search root.
+            # Example:
+            #
+            #   C:/Tcl/lib            <- protected
+            #   C:/Tcl/lib/tk9.0      <- may be forced
+            foreach root [:get_package_paths] {
+                if {[:paths_equal $path $root]} {
+                    return 1
+                }
+            }
+            return 0
+        }
     }
 }
