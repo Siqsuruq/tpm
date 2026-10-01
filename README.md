@@ -54,8 +54,30 @@ tclsh main.tcl
 > available
 > updates
 > install nats
+> update nats
+> delete nats
 > exit
 ```
+
+`installed` shows an **Origin** column: `tpm` for packages recorded in TPM's
+installation manifests, and `system` for packages discovered without a manifest.
+Manifests are saved in `var/installed/*.tpm` and survive restarts. Packages
+installed before manifest tracking are treated as system packages too.
+
+System packages require `--force` (or `-f`) for deletion or installation of a
+repository version:
+
+```text
+delete json --force
+update json -f
+install json --force
+```
+
+`update <package>` installs only when the repository has a newer version;
+`install <package>` selects the latest repository version. An update installs
+into TPM's configured installation directory and can coexist with an older
+system version. Tcl's runtime files, TPM's private dependencies, and package
+search roots remain protected even with force.
 
 ## 💡 Example Output
 

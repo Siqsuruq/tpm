@@ -1,5 +1,5 @@
 namespace eval tpm {
-    nx::Class create system {
+    nx::Class create system -mixin Helper {
         :variable instance:object
 
         :public object method create {args} {
@@ -89,8 +89,7 @@ namespace eval tpm {
         }
 
         :public method print_summary {} {
-            echo "System information:" -style {fg green bold 1}
-            echo "---------------------------------------------" -style {fg red bold 1}
+			:show_title "System information:"
  
 			# General Tcl / TPM information.
             set table [zesty::Table new -box {type "rounded"}]
@@ -127,6 +126,7 @@ namespace eval tpm {
                 $table addRow $path [:check_writable $path]
             }
             $table display
+			:show_separator
         }
 
         :method check_writable {path} {
@@ -167,6 +167,11 @@ namespace eval tpm {
                 return [string equal -nocase [file join {*}$candidate] [file join {*}$parentParts]]
             }
             return [expr {$candidate eq $parentParts}]
+        }
+
+        :public method is_runtime_package_path {path} {
+            # The Tcl library (including ZIPFS builds) belongs to the runtime.
+            return [:is_subpath $path $::tcl_library]
         }
 
         :public method is_protected_package_path {path} {

@@ -5,9 +5,15 @@ namespace eval tpm {
         :method init {} {
         }
 
-        :public method install {pkgName} {
+        :public method install {pkgName {force 0}} {
+            foreach unit [${:pkgdbObj} get_installed_packages_by_name $pkgName] {
+                if {![dict get $unit managed] && !$force} {
+                    :cputs_multi [list red "System package $pkgName requires --force (-f) to install or update."]
+                    return
+                }
+            }
             ${:pkgdbObj} refresh_remote
-            set pkg [${:pkgdbObj} find_remote_package $pkgName]
+            set pkg [${:pkgdbObj} find_remote_latest $pkgName]
 
             if {$pkg eq ""} {
                 puts "Package not found: $pkgName"
@@ -19,11 +25,14 @@ namespace eval tpm {
             set download_url "$base/download/package/$uuid"
 
 			echo "<s fg=green>Downloading from permalink: </s> <s fg=blue>$download_url</s>"
-            set temp_file [file tempfile tmpfile "tpm_pkg_XXXXXX.zip"]
-            # close $tmpfile
+            set tmpchannel [file tempfile temp_file "tpm_pkg_XXXXXX.zip"]
+            close $tmpchannel
 
             if {[catch {
                 set token [::http::geturl $download_url -binary true]
+                if {[::http::status $token] ne "ok" || [::http::ncode $token] != 200} {
+                    error "Download failed: [::http::status $token] [::http::code $token]"
+                }
                 set data  [::http::data $token]
                 set f [open $temp_file wb]
                 fconfigure $f -translation binary
@@ -31,26 +40,72 @@ namespace eval tpm {
                 close $f
                 ::http::cleanup $token
             } err]} {
+                if {[info exists token]} {::http::cleanup $token}
                 puts "✗ Failed to download: $err"
                 file delete -force $temp_file
                 return
             }
 
-            if {[catch {set install_dir [[::tpm::system new] get_install_path]} path_err]} {
+            set sys [::tpm::system new]
+            if {[catch {set install_dir [$sys prepare_install_path]} path_err]} {
 				echo "<s fg=red>✗ Unable to determine install location: </s> <s fg=yellow>$path_err</s>"
                 file delete -force $temp_file
                 return
             }
 			echo "<s fg=green>Installing to: </s> <s fg=blue>$install_dir</s>"
             if {[catch {
-                # exec unzip -o $temp_file -d $install_dir
+                set entries [::zipfile::decode::content $temp_file]
+                :validate_archive_paths $entries $install_dir
+                set unit_paths {}
+                foreach entry $entries {
+                    set destination [file normalize [file join $install_dir $entry]]
+                    if {[$sys is_protected_package_path $destination]} {
+                        error "Protected package path: $destination"
+                    }
+                    if {[file isfile $destination] && !$force} {
+                        set owned 0
+                        foreach unit [${:pkgdbObj} list_installed] {
+                            set prefix [file split [dict get $unit path]]
+                            set candidate [lrange [file split $destination] 0 [expr {[llength $prefix] - 1}]]
+                            if {[string equal -nocase $prefix $candidate] && [dict get $unit managed]} {
+                                set owned 1
+                            }
+                        }
+                        if {!$owned} {error "Existing system file requires --force (-f): $destination"}
+                    }
+                    if {[file tail $entry] eq "pkgIndex.tcl"} {
+                        lappend unit_paths [file dirname $destination]
+                    } elseif {[string match *.tm $entry]} {
+                        lappend unit_paths $destination
+                    }
+                }
+                set unit_paths [lsort -unique $unit_paths]
+                if {[llength $unit_paths] == 0} {
+                    error "Archive contains no pkgIndex.tcl or Tcl modules"
+                }
+                foreach path $unit_paths {
+                    if {[$sys is_protected_package_path $path]} {
+                        error "Protected package path: $path"
+                    }
+                    foreach unit [${:pkgdbObj} list_installed] {
+                        set existing [dict get $unit path]
+                        set prefix [file split $existing]
+                        set candidate [lrange [file split $path] 0 [expr {[llength $prefix] - 1}]]
+                        if {[string equal -nocase $prefix $candidate] && ![dict get $unit managed] && !$force} {
+                            error "System package [dict get $unit name] requires --force (-f)"
+                        }
+                    }
+                }
                 :extract_zip_to $temp_file $install_dir
+                dict set pkg unit_paths $unit_paths
+                dict set pkg install_root $install_dir
+                dict set pkg files $entries
+                :save_manifest $pkg
             } unzip_err]} {
                 puts "Failed to unzip: $unzip_err"
                 file delete -force $temp_file
                 return
             }
-
             file delete -force $temp_file
             :cputs_multi [list green "Package " yellow "$pkgName"  green " version " blue "[dict get $pkg version]" green " installed successfully."]
             ${:pkgdbObj} refresh
@@ -68,14 +123,38 @@ namespace eval tpm {
             }
         }
 
-        :public method uninstall {pkgName} {
+        :public method update {pkgName {force 0}} {
+            ${:pkgdbObj} refresh_remote
+            foreach update [${:pkgdbObj} check_updates] {
+                if {[dict get $update name] eq $pkgName} {
+                    :install $pkgName $force
+                    return
+                }
+            }
+            :cputs_multi [list green "No update available for " yellow $pkgName]
+        }
+
+        :public method uninstall {pkgName {force 0}} {
             set pkgs [${:pkgdbObj} get_installed_packages_by_name $pkgName]
             if {[llength $pkgs] == 0} {
                 :cputs_multi [list green "Cannot find installation information for " yellow "$pkgName"]
                 return
             }
+            set sys [::tpm::system new]
+            # Check every matching installation before deleting anything.
             foreach pkg $pkgs {
-                set indx [dict get $pkg indx]
+                set path [dict get $pkg path]
+                if {[$sys is_protected_package_path $path]} {
+                    :cputs_multi [list red "Protected package path: $path"]
+                    return
+                }
+                if {![dict get $pkg managed] && !$force} {
+                    :cputs_multi [list red "System package $pkgName requires --force (-f) to delete."]
+                    return
+                }
+            }
+            foreach pkg $pkgs {
+                set indx [dict get $pkg path]
                 if {![file exists $indx]} {
                     :cputs_multi [list red_bold "Installed package path does not exist: " red "$indx"]
                     return
@@ -86,13 +165,26 @@ namespace eval tpm {
                         file delete -force -- $indx
                     } on error {errMsg} {
                         :cputs_multi [list red_bold "Failed to delete package " yellow "$pkgName" red_bold " : " red "$errMsg"]
+                        return
                     }
-                } elseif {[string match pkgIndex.tcl [file tail $indx]] == 1} {
+                } elseif {[dict get $pkg type] eq "pkgIndex"} {
                     try {
                         file delete -force -- [dict get $pkg path]
                     } on error {errMsg} {
                         :cputs_multi [list red_bold "Failed to delete package " yellow "$pkgName" red_bold " : " red "$errMsg"]
+                        return
                     }
+                }
+                # Keep a shared manifest until all its installation units are gone.
+                set manifest [dict get $pkg manifest]
+                if {$manifest ne ""} {
+                    set remaining 0
+                    if {[dict exists $manifest unit_paths]} {
+                        foreach path [dict get $manifest unit_paths] {
+                            if {[file exists $path]} {set remaining 1}
+                        }
+                    }
+                    if {!$remaining} {file delete -force -- [dict get $pkg manifest_file]}
                 }
                 :cputs_multi [list green "Removing package from: " blue "$indx"]
                 ${:pkgdbObj} refresh

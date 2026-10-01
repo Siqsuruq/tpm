@@ -1,5 +1,5 @@
 namespace eval tpm {
-    nx::Class create net -mixin Helper {
+    nx::Class create net {
         :property {repo_url:substdefault {[::tpm::config cget -default_repo_url]}}
         :property {progress_current 0}
 
@@ -36,18 +36,13 @@ namespace eval tpm {
             # Zesty progress bar.
             #
             set bar [zesty::Bar new]
-            set task [$bar addTask \
-                -name "Fetching package index" \
-                -total 100]
+            set task [$bar addTask -name "Fetching package index" -total 100]
 
             set :progress_current 0
             set token ""
 
             try {
-                set token [::http::geturl $listUrl \
-                    -binary true \
-                    -keepalive 1 \
-                    -progress [list [self] http_progress $bar $task]]
+                set token [::http::geturl $listUrl -binary true -keepalive 1 -progress [list [self] http_progress $bar $task]]
 
                 #
                 # Make sure we end at 100%.
@@ -58,8 +53,7 @@ namespace eval tpm {
                 }
 
                 if {[::http::status $token] ne "ok"} {
-                    return -code error \
-                        "Failed to fetch package list from $listUrl"
+                    return -code error "Failed to fetch package list from $listUrl"
                 }
 
                 set body [::http::data $token]
@@ -70,8 +64,7 @@ namespace eval tpm {
                 set jsonDict [::json::json2dict $body]
 
                 if {![dict exists $jsonDict data]} {
-                    return -code error \
-                        "Invalid response: missing 'data' key"
+                    return -code error "Invalid response: missing 'data' key"
                 }
 
                 return [dict get $jsonDict data]

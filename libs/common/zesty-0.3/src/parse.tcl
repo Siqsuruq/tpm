@@ -1,4 +1,4 @@
-# Copyright (c) 2025 Nicolas ROBERT.
+# Copyright (c) 2025-2026 Nicolas ROBERT.
 # Distributed under MIT license. Please see LICENSE for details.
 
 namespace eval zesty {}
@@ -23,8 +23,9 @@ proc zesty::parseStyle {text base_style {no_reset 0} {filters {}} {command {}}} 
     if {[llength $filters] > 0} {
         set result [zesty::parseTypeFilters $result $filters]
     } elseif {$command ne ""} {
-        if {[info commands $command] eq ""} {
-            zesty::throwError "'$command' is not a valid command."
+        set name [lindex $command 0]
+        if {[uplevel #0 [list namespace which -command $name]] eq ""} {
+            zesty::throwError "'$name' is not a valid command."
         }
         set result [uplevel #0 [list {*}$command $text]]
     }
@@ -44,7 +45,8 @@ proc zesty::parseStyle {text base_style {no_reset 0} {filters {}} {command {}}} 
         set processed_text $base_ansi
     }
     
-    set re {<s\s*([^>]+)>([^<]*)</s>}
+    # Regular expression to match <s> tags
+    set re {<s\s+([^>]+)>([^<]*)</s>}
     
     # Search for <s> tags
     while {[regexp -indices -start $current_pos $re $result match attr_indices content_indices]} {
@@ -61,25 +63,40 @@ proc zesty::parseStyle {text base_style {no_reset 0} {filters {}} {command {}}} 
         append processed_text $before
         
         # Process tag attributes
-        set local_ansi ""
-        if {[string match "*=*" $attributes]} {
-            set local_ansi [zesty::parseEqualFormat $attributes]
-        } else {
-            # Unsupported format - ignore
-            zesty::throwError "Error: unsupported style format: $attributes"
+        if {![string match "*=*" $attributes]} {
+            error "zesty(error): Unsupported style format: $attributes"
         }
-        
+        set attrs [zesty::parseEqualAttributes $attributes]
+
+        # 'link' is not a style: 'link=1' targets the content itself,
+        # any other value is the target URL, a false value disables it.
+        set link ""
+        if {[dict exists $attrs link]} {
+            set link [dict get $attrs link]
+            dict unset attrs link
+            if {[string is boolean -strict $link]} {
+                set link [expr {$link ? $content : ""}]
+            }
+        }
+        set local_ansi [zesty::parseStyleDictToANSI $attrs]
+
         # Apply local style, then content, then return to base style
         if {$local_ansi ne ""} {
             append processed_text $local_ansi
         }
-        append processed_text $content
+        if {$link ne ""} {
+            # OSC 8 hyperlink: the terminal shows the content and
+            # opens the link on Ctrl+click (ignored if unsupported).
+            append processed_text "\033\]8;;$link\033\\" $content "\033\]8;;\033\\"
+        } else {
+            append processed_text $content
+        }
         
         # Return to base style after local content (or reset if no base)
         if {$base_ansi ne ""} {
             append processed_text $base_ansi  ; # Return to base style
         } elseif {!$no_reset} {
-            append processed_text "\033\[0m"   ; # Complete reset
+            append processed_text [zesty::resetANSIStyle]   ; # Complete reset
         }
         
         set current_pos [expr {$match_end + 1}]
@@ -90,9 +107,9 @@ proc zesty::parseStyle {text base_style {no_reset 0} {filters {}} {command {}}} 
     
     # Final reset if necessary
     if {!$no_reset} {
-        append processed_text "\033\[0m"
+        append processed_text [zesty::resetANSIStyle]
     }
-    
+
     return $processed_text
 }
 
@@ -125,10 +142,15 @@ proc zesty::parseTypeFilters {text filters} {
             "email" {
                 # Pattern for email addresses
                 set pattern {([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})}
+                # A clickable email address opens the mail client.
+                if {[dict exists $style link] && [string is true -strict [dict get $style link]]} {
+                    dict set style link "mailto:\\1"
+                }
             }
             "url" {
-                # Pattern for URLs
-                set pattern {(https?://[^\s]+)}
+                # Pattern for URLs (trailing punctuation is not part of the link).
+                # \x22 is '"', written this way to keep editors' syntax highlighting.
+                set pattern {(https?://[^\s<>\x22]*[^\s<>\x22.,;:!?)\]])}
             }
             default {
                 zesty::throwError "Unknown type: $key"
@@ -148,12 +170,21 @@ proc zesty::parseTypeFilters {text filters} {
 proc zesty::parseEqualFormat {attributes} {
     # Parses the format with equal sign (fg=red bold=true).
     # Handles quoted values and converts style dictionary to ANSI.
-    # Supports values with spaces when quoted (single or double quotes).
     #
     # attributes - attribute string with key=value pairs
     #
     # Returns: ANSI escape codes for the parsed attributes.
-    
+    return [zesty::parseStyleDictToANSI [zesty::parseEqualAttributes $attributes]]
+}
+
+proc zesty::parseEqualAttributes {attributes} {
+    # Parses the format with equal sign (fg=red bold=true) into a
+    # dictionary. Supports values with spaces when quoted (single or
+    # double quotes).
+    #
+    # attributes - attribute string with key=value pairs
+    #
+    # Returns: A dictionary of attribute names and values.
     set style_dict {}
     set pattern {(\w+)\s*=\s*(?:'([^']*)'|\"([^\"]*)\"|([^\s]+))}
     
@@ -170,8 +201,8 @@ proc zesty::parseEqualFormat {attributes} {
         }
         dict set style_dict $key $value
     }
-    
-    return [zesty::parseStyleDictToANSI $style_dict]
+
+    return $style_dict
 }
 
 proc zesty::parseStyleDictToANSI {style_dict} {
@@ -258,7 +289,12 @@ proc zesty::parseStyleDictToXML {text style_dict} {
             }
         }
     }
-    
+
+    # Hyperlink: 'link 1' targets the text itself, otherwise the given URL.
+    if {[dict exists $style_dict link]} {
+        dict set general_attrs link [dict get $style_dict link]
+    }
+
     # If no valid attributes, return text as is
     if {![dict size $general_attrs]} {
         return $text
@@ -360,4 +396,15 @@ proc zesty::parseContentLine {line} {
         parsed_line $parsed_line \
         visible_length [zesty::strLength $parsed_line] \
     ]
+}
+
+proc zesty::unescapeStyleTags {text escape_map} {
+    # Unescape back to original characters
+    #
+    # text       - input text
+    # escape_map - escape character mapping
+    #
+    # Returns: unescaped text
+
+    return [string map $escape_map $text]
 }

@@ -1,4 +1,4 @@
-# Copyright (c) 2025 Nicolas ROBERT.
+# Copyright (c) 2025-2026 Nicolas ROBERT.
 # Distributed under MIT license. Please see LICENSE for details.
 
 namespace eval zesty {
@@ -233,22 +233,40 @@ proc zesty::styleANSICode {name} {
 
 proc zesty::colorANSICode {color_code {bg 0}} {
     # Generates ANSI escape code for terminal colors.
+    # No color is generated when the NO_COLOR environment variable
+    # is set to a non-empty value (see https://no-color.org).
     #
     # color_code - numeric color code (0-255)
     # bg         - whether to apply as background color (default: 0)
     #
     # Returns: the ANSI escape sequence for the specified color,
-    # empty string if color_code is empty.
+    # empty string if color_code is empty or colors are disabled.
 
-    if {$color_code ne ""} {
-        if {$bg} {
-            return "\033\[48;5;${color_code}m"
-        } else {
-            return "\033\[38;5;${color_code}m"
-        }
+    if {$color_code eq "" || [zesty::noColor]} {
+        return {}
     }
+    if {$bg} {
+        return "\033\[48;5;${color_code}m"
+    }
+    return "\033\[38;5;${color_code}m"
+}
 
-    return {}
+proc zesty::noColor {} {
+    # Checks if colors are disabled by the NO_COLOR environment variable.
+    #
+    # Returns: true if NO_COLOR is set to a non-empty value, false otherwise.
+    return [expr {
+        [info exists ::env(NO_COLOR)] && 
+        $::env(NO_COLOR) ne ""
+    }]
+}
+
+proc zesty::resetANSIStyle {} {
+    # Generates ANSI escape code to reset terminal formatting.
+    #
+    # Returns: the ANSI escape sequence to reset formatting.
+
+    return "\033\[0m"
 }
 
 proc zesty::echo {args} {
@@ -256,24 +274,28 @@ proc zesty::echo {args} {
     # support.
     #
     # args - variable arguments supporting:
-    #   -style {key value ...}  - style specifications
-    #   -filters {filter_list}  - text filters to apply
-    #   -command {command}      - command to execute
-    #   -n                      - suppress newline
-    #   -noreset                - don't reset formatting at end
-    #   text...                 - text content to display
+    #   -style {key value ...}      - style specifications
+    #   -filters {filter_list}      - text filters to apply
+    #   -command {command}          - Command to execute on the text before display.
+    #   -n                          - suppress newline
+    #   -noreset                    - don't reset formatting at end
+    #   -escape_map {key value ...} - escape character mapping
+    #   -raw                        - display raw text
+    #   text                        - text content to display
     #
     # Returns: nothing, outputs formatted text to stdout.
-    set text ""
+    set textParts {}
     set styleList {}
     set filters {}
     set addNewline 1
     set noReset 0
     set command {}
+    set escape_map {}
+    set raw 0
 
     for {set i 0} {$i < [llength $args]} {incr i} {
         set arg [lindex $args $i]
-        switch -- $arg {
+        switch -exact -- $arg {
             "-style" {
                 incr i
                 if {$i < [llength $args]} {
@@ -292,29 +314,52 @@ proc zesty::echo {args} {
                     set command [lindex $args $i]
                 }
             }
+            "-escape_map" {
+                incr i
+                if {$i < [llength $args]} {
+                    set escape_map [lindex $args $i]
+                }
+            }
             "-n"       {set addNewline 0}
             "-noreset" {set noReset 1}
+            "-raw"     {set raw 1}
             default {
-                append text $arg
-                if {$i < [llength $args] - 1} {
-                    append text " "
-                }
+                lappend textParts $arg
             }
         }
     }
-    
-    # Mode with base style + inline tags
-    if {[llength $styleList] > 0} {
-        # Check if arguments are in key-value pairs
-        zesty::validateKeyValuePairs "-style" $styleList
+    set text [join $textParts " "]
+
+    if {$raw} {
+        set output $text
+    } else {
+        # Mode with base style + inline tags
+        if {[llength $styleList] > 0} {
+            # Check if arguments are in key-value pairs
+            zesty::validateKeyValuePairs "-style" $styleList
+        }
+
+        set output [zesty::parseStyle \
+            $text $styleList \
+            $noReset $filters \
+            $command 
+        ]
     }
 
-    set output [zesty::parseStyle \
-        $text $styleList \
-        $noReset $filters \
-        $command 
-    ]
+    # Mode with escape character mapping.
+    if {[llength $escape_map] > 0} {
+        # Check if arguments are in key-value pairs
+        zesty::validateKeyValuePairs "-escape_map" $escape_map
+        set output [zesty::unescapeStyleTags $output $escape_map]
+    }
     
+    # While a progress bar is live, the display thread owns the terminal:
+    # it erases the live region, writes the message and redraws the bars.
+    if {[llength [info commands ::zesty::live::active]] && [zesty::live::active]} {
+        zesty::live::write $output $addNewline
+        return
+    }
+
     # Display output
     if {$addNewline} {
         puts stdout $output

@@ -397,7 +397,7 @@ zesty::echo "\n• Truncation with default message:"
 set bb [zesty::box \
     -title {name "2D Truncation"} \
     -content {text "<s fg=red>Red line 1</s>\n<s fg=blue>Blue line 2</s>\n<s fg=green>Very long green line 3 that overflows</s>\n<s fg=yellow>Yellow line 4</s>\n<s fg=purple>Purple line 5</s>"} \
-    -box {size {300 4}} \
+    -box {size {30 4}} \
     -paddingX 1 \
     -paddingY 0
 ]

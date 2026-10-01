@@ -7,6 +7,11 @@ lappend auto_path [file dirname [file dirname [file normalize [info script]]]]
 
 package require zesty
 
+proc sleep {time} {
+    after $time {set end 1}
+    vwait end
+}
+
 proc test_basic_progress {} {
     zesty::echo "\n=== Test 1: Basic Progress Bar ==="
     
@@ -16,7 +21,8 @@ proc test_basic_progress {} {
     # Add a task
     set task1 [$bar addTask -name "Downloading" -total 100]
 
-    zesty::loop -start 0 -end 100 -delay 100 {
+    for {set i 0} {$i <= 100} {incr i} {
+        sleep 100
         $bar advance $task1 1
     }
     
@@ -45,7 +51,8 @@ proc test_multiple_tasks {} {
     set task2 [$bar addTask -name "Installing" -total 80]
     set task3 [$bar addTask -name "Configuring" -total 50]
 
-    zesty::loop -start 0 -end 100 -delay 100 {
+    for {set i 0} {$i <= 100} {incr i} {
+        sleep 100
         $bar advance $task1 1
         $bar advance $task2 8
         $bar advance $task3 15
@@ -218,7 +225,8 @@ proc test_mixed_modes {} {
     set task1 [$bar addTask -name "Scanning..." -mode indeterminate]
     set task2 [$bar addTask -name "Processing..." -total 100]
 
-    zesty::loop -start 0 -end 100 -delay 100 {
+    for {set i 0} {$i <= 100} {incr i} {
+        sleep 100
         $bar advance $task2 1
     }
 
@@ -261,13 +269,49 @@ proc test_custom_command_column {} {
     
     set task1 [$bar addTask -name "Task with custom status..." -total 100]
     
-    zesty::loop -start 0 -end 100 -delay 100 {
+    for {set i 0} {$i <= 100} {incr i} {
+        sleep 100
         $bar advance $task1 1
     }
 
     $bar destroy
 
     zesty::echo "Custom command column test completed"
+}
+
+# Custom command failing on purpose between 30% and 60%
+proc failing_status_command {bar_obj task_id task_dict} {
+    set completed [dict get $task_dict completed]
+
+    if {$completed >= 30 && $completed < 60} {
+        error "status unavailable at ${completed}%"
+    }
+    return "OK"
+}
+
+proc test_callback_errors {} {
+    zesty::echo "\n=== Test 12: Column Callback Errors ==="
+
+    set previous [interp bgerror {}]
+    interp bgerror {} [list apply {{message options} {
+        zesty::echo -style {fg red} "Reported: $message"
+    }}]
+
+    set bar [zesty::Bar new \
+        -setColumns {zName zCount zBar zPercent failing_status_command} \
+    ]
+
+    set task1 [$bar addTask -name "Callback errors..." -total 100]
+
+    for {set i 0} {$i < 100} {incr i} {
+        sleep 50
+        $bar advance $task1 1
+    }
+
+    $bar destroy
+    interp bgerror {} $previous
+
+    zesty::echo "Callback errors test completed"
 }
 
 # Performance test
@@ -303,6 +347,8 @@ proc test_error_handling {} {
     catch {zesty::Bar new -minBarWidth 2} msg4
     catch {$bar configureColumn 0 -align "invalid"} msg5
 
+    $bar destroy
+
     zesty::echo $msg1
     zesty::echo $msg2
     zesty::echo $msg3
@@ -327,6 +373,7 @@ proc run_all_tests {} {
         test_styling
         test_mixed_modes
         test_custom_command_column
+        test_callback_errors
     } on error {result options} {
         zesty::throwError [dict get $options -errorinfo]
     } finally {
@@ -350,9 +397,10 @@ proc interactive_menu {} {
     zesty::echo "9. Custom Command Column" -filters {num {fg green}}
     zesty::echo "10. Performance Test" -filters {num {fg green}}
     zesty::echo "11. Error Handling" -filters {num {fg green}}
+    zesty::echo "12. Column Callback Errors" -filters {num {fg green}}
     zesty::echo "0. Exit" -filters {num {fg red}}
-    
-    zesty::echo -n "Enter choice (0-11): "
+
+    zesty::echo -n "Enter choice (0-12): "
     flush stdout
     gets stdin choice
     
@@ -368,6 +416,7 @@ proc interactive_menu {} {
         9 { zesty::resetTerminal ; test_custom_command_column }
         10 { zesty::resetTerminal ; test_performance }
         11 { zesty::resetTerminal ; test_error_handling }
+        12 { zesty::resetTerminal ; test_callback_errors }
         0 { zesty::echo "Exiting..."; return }
         default { zesty::echo "Invalid choice. Please try again." }
     }

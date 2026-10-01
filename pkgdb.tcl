@@ -69,8 +69,7 @@ namespace eval tpm {
                 if {$name eq "" || $local_v eq ""} {
                     continue
                 }
-                if {![dict exists $latest_local $name] ||
-                    [package vcompare $local_v [dict get $latest_local $name]] > 0} {
+                if {![dict exists $latest_local $name] || [package vcompare $local_v [dict get $latest_local $name]] > 0} {
                     dict set latest_local $name $local_v
                 }
             }
@@ -96,7 +95,7 @@ namespace eval tpm {
 		:public method refresh {} {
 		    set :provided_pkgs {}
 			set :installed_pkgs {}
-			set systemObj [::tpm::system create]
+			set systemObj [::tpm::system new]
 			set pkgDirs [$systemObj get_package_paths]
 			set pkgParserObj [::tpm::pkgParser new -pkgDirs $pkgDirs]
 			try {
@@ -112,6 +111,7 @@ namespace eval tpm {
 			set groups [dict create]
 			set group_paths [dict create]
 			set group_types [dict create]
+			set systemObj [::tpm::system new]
 			# Group raw Tcl package registrations into physical installation units.
 			foreach pkg ${:provided_pkgs} {
 				set type [dict get $pkg type]
@@ -125,7 +125,22 @@ namespace eval tpm {
 						set unit_path [file normalize [dict get $pkg path]]
 					}
 				}
-				set key [list $type $unit_path]
+				# Embedded/runtime packages share physical directories. Keep each
+				# registration visible rather than inventing a directory package name.
+				if {[$systemObj is_runtime_package_path $unit_path] || [string match {//zipfs:*} $unit_path]} {
+					set type runtime
+					set key [list $type [dict get $pkg name] [dict get $pkg version]]
+					# A parent index may source child indexes. Prefer the child
+					# location for the same runtime registration, without duplicate rows.
+					if {[dict exists $group_paths $key]} {
+						if {[llength [file split $unit_path]] <= [llength [file split [dict get $group_paths $key]]]} {
+							continue
+						}
+						dict set groups $key {}
+					}
+				} else {
+					set key [list $type $unit_path]
+				}
 				dict lappend groups $key $pkg
 				dict set group_paths $key $unit_path
 				dict set group_types $key $type
@@ -137,6 +152,10 @@ namespace eval tpm {
 				set type [dict get $group_types $key]
 				set name [:infer_unit_name $path $provides]
 				set version [:infer_unit_version $name $provides]
+				if {$type eq "runtime"} {
+					set name [dict get [lindex $provides 0] name]
+					set version [dict get [lindex $provides 0] version]
+				}
 				set provided_names {}
 				set indexes {}
 				foreach pkg $provides {
@@ -153,11 +172,12 @@ namespace eval tpm {
 				set manifest [:find_manifest_for_path $path $manifests]
 				set managed 0
 				set manifest_file ""
-				if {$manifest ne ""} {
+				if {$manifest ne "" && $type ne "runtime"} {
 					set managed 1
 					set manifest_file [dict get $manifest manifest_file]
 				}
-				lappend installed [dict create name $name version $version path $path type $type managed $managed \
+				set origin [expr {$managed ? "tpm" : "system"}]
+				lappend installed [dict create name $name version $version path $path type $type managed $managed origin $origin \
 					manifest_file $manifest_file manifest $manifest provided_names $provided_names \
 					provided_count [llength $provided_names] provides $provides indexes $indexes]
 			}
@@ -309,6 +329,13 @@ namespace eval tpm {
 
 		:method find_manifest_for_path {path manifests} {
 			foreach manifest $manifests {
+				if {[dict exists $manifest unit_paths]} {
+					foreach unit_path [dict get $manifest unit_paths] {
+						if {[:paths_equal $path $unit_path]} {
+							return $manifest
+						}
+					}
+				}
 				if {![dict exists $manifest unit_path]} {
 					continue
 				}

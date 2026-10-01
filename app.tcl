@@ -18,8 +18,7 @@ namespace eval tpm {
 				-paddingY 0
 			]
 			zesty::echo $bb
-			echo "_________________________________________________________________________________________________________" -style {fg red bold 1}
-
+			:show_separator
 
             while {1} {
                 puts -nonewline "> "
@@ -52,18 +51,23 @@ namespace eval tpm {
                 system {
                     ${:sysObj} print_summary
                 }
-                install {
-                    if {[llength $args] != 1} {
-                        :cputs_multi [list green "Usage: " blue "install <package>"]
-                    } else {
-                        :install_package [lindex $args 0]
+                install - update - delete {
+                    set force 0
+                    set names {}
+                    set invalid 0
+                    foreach arg $args {
+                        if {$arg in {--force -f}} {
+                            set force 1
+                        } elseif {[string match -* $arg]} {
+                            set invalid 1
+                        } else {
+                            lappend names $arg
+                        }
                     }
-                }
-                delete {
-                    if {[llength $args] != 1} {
-                        :cputs_multi [list green "Usage: " blue "delete <package>"]
+                    if {$invalid || [llength $names] != 1} {
+                        :cputs_multi [list green "Usage: " blue "$cmd <package> \[--force|-f\]"]
                     } else {
-                        :delete_package [lindex $args 0]
+                        :${cmd}_package [lindex $names 0] $force
                     }
                 }
                 help {
@@ -77,33 +81,35 @@ namespace eval tpm {
         }
 
 		:method list_local {args} {
-			:cputs green "Locally installed packages:"
-			:cputs red "------------------------------------------------------"
+			:show_title "Locally installed packages:"
+
 			set table [zesty::Table new -box {type "rounded"}]
 			$table addColumn -name "Package" -width 30 -style {fg yellow}
 			$table addColumn -name "Version" -width 10 -style {fg green}
+			$table addColumn -name "Origin" -width 8 -style {fg green}
 			$table addColumn -name "Path" -width 60 -style {fg cyan}
 			$table addColumn -name "Provides" -justify "left" -style {fg gray}
 			if {[llength $args] == 0} {
 				set pkgs [${:pkgdbObj} list_installed]
 				if {[llength $pkgs] > 0} {
 					foreach pkgDict $pkgs {
-						$table addRow [dict get $pkgDict name] [dict get $pkgDict version] [dict get $pkgDict path] [dict get $pkgDict provided_count]
+						$table addRow [dict get $pkgDict name] [dict get $pkgDict version] [dict get $pkgDict origin] [dict get $pkgDict path] [dict get $pkgDict provided_count]
 					}
 				} else {
-					$table addRow "<s fg=red>There are no packages installed.</s>" "" "" ""
+					$table addRow "<s fg=red>There are no packages installed.</s>" "" "" "" ""
 				}
 			} else {
 				foreach pkg $args {
 					set unit [${:pkgdbObj} find_installed_unit $pkg]
 					if {$unit ne ""} {
-						$table addRow [dict get $unit name] [dict get $unit version] [dict get $unit path] [dict get $unit provided_count]
+						$table addRow [dict get $unit name] [dict get $unit version] [dict get $unit origin] [dict get $unit path] [dict get $unit provided_count]
 					} else {
-						$table addRow "$pkg <s fg=red>is not installed.</s>" "" "" ""
+						$table addRow "$pkg <s fg=red>is not installed.</s>" "" "" "" ""
 					}
 				}
 			}
 			$table display
+			:show_separator
 		}
 
         :public method list_remote {} {
@@ -128,8 +134,12 @@ namespace eval tpm {
         :public method list_updates {} {
             try {
                 set updates [${:pkgdbObj} check_updates]
-                :cputs green "Available package updates:"
-                :cputs red "------------------------------------------------------"
+				echo "Available package updates:" -style {fg green bold 1}
+				echo "---------------------------------------------" -style {fg red bold 1}
+				set table [zesty::Table new -box {type "rounded"}]
+				$table addColumn -name "Package" -width 25 -style {fg yellow}
+				$table addColumn -name "Local Version" -width 15 -style {fg green}
+				$table addColumn -name "Remote Version" -width 15 -style {fg blue}
                 if {[llength $updates] == 0} {
                     :cputs_multi [list green " ✓ " yellow "All packages are up to date."]
                     return
@@ -145,17 +155,21 @@ namespace eval tpm {
                     :cputs_multi $line
                 }
             } on error {errMsg} {
-                :cputs_multi [list red_bold "Error: " red "$errMsg"]
+                :show_error $errMsg
             }
         }
 
-        :method install_package {pkgName} {
+        :method install_package {pkgName {force 0}} {
             set inst [::tpm::installer new -pkgdbObj ${:pkgdbObj}] 
-            $inst install $pkgName
-            $inst destroy
+            try {$inst install $pkgName $force} finally {$inst destroy}
         }
 
-        :method delete_package {pkgName} {
+        :method update_package {pkgName {force 0}} {
+            set inst [::tpm::installer new -pkgdbObj ${:pkgdbObj}]
+            try {$inst update $pkgName $force} finally {$inst destroy}
+        }
+
+        :method delete_package {pkgName {force 0}} {
             :cputs_multi [list green "Deleting locally installed package: " yellow "$pkgName"]
             :cputs red "------------------------------------------------------"
             if {![${:pkgdbObj} is_installed $pkgName]} {
@@ -163,18 +177,22 @@ namespace eval tpm {
                 return
             }
             set inst [::tpm::installer new -pkgdbObj ${:pkgdbObj}] 
-            $inst uninstall $pkgName
-            $inst destroy
+            try {$inst uninstall $pkgName $force} finally {$inst destroy}
         }
 
+
+		
+		
         :method help {} {
+			:show_title "Help:"
 			set data {
 				{"installed" "List all locally installed packages"}
 				{"installed <s fg=red>name(s)</s>" "Show version info of a specific installed package(s)"}
 				{"available" "List packages in the remote repository"}
-				{"install <s fg=red>name</s>" "Install package from the remote repository"}
+				{"install name [-f|--force]" "Install latest repository version; force required for system packages"}
+				{"update name [-f|--force]" "Install a newer repository version; force required for system packages"}
 				{"updates" "Check installed packages for available updates"}
-				{"delete <s fg=red>name</s>" "Delete (uninstall) package"}
+				{"delete name [-f|--force]" "Delete package; force required for system packages"}
 				{"system" "Shows current system information"}
 				{"help" "Show this help message"}
 				{"exit" "Exit the package manager"}
@@ -193,6 +211,7 @@ namespace eval tpm {
 					} \
 				]
 			]
+			:show_separator
         }
     }
 }

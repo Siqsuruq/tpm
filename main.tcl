@@ -33,8 +33,8 @@ package require dicttool
 package require platform
 package require inifile
 package require zesty
-namespace import zesty::echo
 
+namespace import zesty::echo
 
 ::http::register https 443 ::tls::socket
 

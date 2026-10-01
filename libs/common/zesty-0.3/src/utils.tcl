@@ -1,4 +1,4 @@
-# Copyright (c) 2025 Nicolas ROBERT.
+# Copyright (c) 2025-2026 Nicolas ROBERT.
 # Distributed under MIT license. Please see LICENSE for details.
 
 namespace eval zesty {}
@@ -183,7 +183,7 @@ proc zesty::loop {args} {
             -delay  {set delay $value}
             -start  {set start $value}
             -end    {set end $value}
-            default {zesty::throwError "'$key' non supporté"}
+            default {zesty::throwError "'$key' not supported."}
         }
     }
     
@@ -656,6 +656,11 @@ proc zesty::SetTerminalTitle {text} {
     }
 }
 
+proc zesty::setTerminalTitle {text} {
+    # See zesty::SetTerminalTitle proc for details.
+    zesty::SetTerminalTitle $text
+} 
+
 proc zesty::showCursor {} {
     # Sends ANSI escape sequences to show cursor.
     #
@@ -665,13 +670,12 @@ proc zesty::showCursor {} {
 }
 
 proc zesty::throwError {msg} {
-    # Throws an error.
+    # Throws an error, restoring the cursor visibility first.
     #
     # msg - error message
     #
-    # Returns error message. 
+    # Returns: Nothing, raises an error.
 
-    zesty::resetTerminal
     zesty::showCursor
 
     return -code error "zesty(error): $msg"
@@ -687,7 +691,7 @@ proc zesty::validateKeyValuePairs {key value} {
 
     if {[llength $value] % 2} {
         set msg "wrong # args: '$key' must be in key-value pairs."
-        return -level [info level] -code error $msg
+        return -code error $msg
     }
 }
 
@@ -949,7 +953,9 @@ proc zesty::typeOf {value} {
         return num
     }
 
-    if {[info commands $value] ne ""} {
+    # Exact lookup: 'info commands' would treat the value as a glob
+    # pattern ('*' matches every command).
+    if {[namespace which -command $value] ne ""} {
         return cmd
     }
 
