@@ -16,8 +16,7 @@ namespace eval tpm {
             ${:pkgdbObj} refresh_remote
             set pkg [${:pkgdbObj} find_remote_latest $pkgName]
             if {$pkg eq ""} {
-                :cputs_multi [list red "Package not found: $pkgName"]
-                return
+                error "Package not found: $pkgName"
             }
             set channel [file tempfile stage]
             close $channel
