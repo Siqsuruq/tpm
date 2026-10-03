@@ -16,6 +16,12 @@ proc ::package {args} {
         }
         return -options $options $value
     }
+    # Tk creates a root window and installs a main loop in tclsh. Hide the
+    # root before returning to the package loader, without processing events.
+    if {[lindex $args 0] eq "require" && [llength [info commands ::wm]] &&
+        [llength [info commands ::winfo]] && [::winfo exists .]} {
+        ::wm withdraw .
+    }
     return $value
 }
 set requireArgs [dict get $request require]
@@ -80,3 +86,5 @@ if {[catch {
 set ch [open $resultFile w]
 puts $ch $result
 close $ch
+# Loading Tk otherwise makes tclsh enter Tk's main loop at script completion.
+exit 0
