@@ -51,7 +51,38 @@ namespace eval tpm {
                 system {
                     ${:sysObj} print_summary
                 }
-                install - update - delete {
+                delete {
+                    set force 0
+                    set version ""
+                    set all 0
+                    set names {}
+                    set invalid 0
+                    for {set i 0} {$i < [llength $args]} {incr i} {
+                        set arg [lindex $args $i]
+                        switch -- $arg {
+                            -f - --force {set force 1}
+                            --all {set all 1}
+                            --version {
+                                incr i
+                                set value [lindex $args $i]
+                                if {$version ne "" || $value eq "" || [catch {package vcompare $value 0}]} {
+                                    set invalid 1
+                                } else {set version $value}
+                            }
+                            default {
+                                if {[string match -* $arg]} {set invalid 1} else {lappend names $arg}
+                            }
+                        }
+                    }
+                    if {$invalid || [llength $names] != 1 || ($all && $version ne "")} {
+                        :cputs_multi [list green "Usage: " blue "delete <package> \[--version <version>|--all\] \[--force|-f\]"]
+                    } else {
+                        try {
+                            :delete_package [lindex $names 0] $force $version $all
+                        } on error {message} {:show_error $message}
+                    }
+                }
+                install - update {
                     set force 0
                     set names {}
                     set invalid 0
@@ -67,7 +98,11 @@ namespace eval tpm {
                     if {$invalid || [llength $names] != 1} {
                         :cputs_multi [list green "Usage: " blue "$cmd <package> \[--force|-f\]"]
                     } else {
-                        :${cmd}_package [lindex $names 0] $force
+                        try {
+                            :${cmd}_package [lindex $names 0] $force
+                        } on error {message} {
+                            :show_error $message
+                        }
                     }
                 }
                 help {
@@ -100,10 +135,14 @@ namespace eval tpm {
 				}
 			} else {
 				foreach pkg $args {
-					set unit [${:pkgdbObj} find_installed_unit $pkg]
-					if {$unit ne ""} {
-						$table addRow [dict get $unit name] [dict get $unit version] [dict get $unit origin] [dict get $unit path] [dict get $unit provided_count]
-					} else {
+					set found 0
+					foreach unit [${:pkgdbObj} list_installed] {
+						if {[dict get $unit name] eq $pkg || [lsearch -exact [dict get $unit provided_names] $pkg] >= 0} {
+							$table addRow [dict get $unit name] [dict get $unit version] [dict get $unit origin] [dict get $unit path] [dict get $unit provided_count]
+							set found 1
+						}
+					}
+					if {!$found} {
 						$table addRow "$pkg <s fg=red>is not installed.</s>" "" "" "" ""
 					}
 				}
@@ -127,15 +166,15 @@ namespace eval tpm {
                 }
 				$table display
             } on error {errMsg} {
-                :cputs_multi [list red_bold "Error: " red "$errMsg"]
+				:show_error $errMsg
             }
         }
 
         :public method list_updates {} {
             try {
                 set updates [${:pkgdbObj} check_updates]
-				echo "Available package updates:" -style {fg green bold 1}
-				echo "---------------------------------------------" -style {fg red bold 1}
+				:show_title "Available package updates:"
+
 				set table [zesty::Table new -box {type "rounded"}]
 				$table addColumn -name "Package" -width 25 -style {fg yellow}
 				$table addColumn -name "Local Version" -width 15 -style {fg green}
@@ -169,15 +208,17 @@ namespace eval tpm {
             try {$inst update $pkgName $force} finally {$inst destroy}
         }
 
-        :method delete_package {pkgName {force 0}} {
-            :cputs_multi [list green "Deleting locally installed package: " yellow "$pkgName"]
-            :cputs red "------------------------------------------------------"
+        :method delete_package {pkgName {force 0} {version ""} {all 0}} {
+			:show_title "Deleting locally installed package:"
+            :cputs_multi [list green " " yellow "$pkgName"]
+
             if {![${:pkgdbObj} is_installed $pkgName]} {
                 :cputs_multi [list green "Package " yellow "$pkgName" green " is not installed."]
                 return
             }
             set inst [::tpm::installer new -pkgdbObj ${:pkgdbObj}] 
-            try {$inst uninstall $pkgName $force} finally {$inst destroy}
+            try {$inst uninstall $pkgName $force $version $all} finally {$inst destroy}
+			:show_separator
         }
 
 
@@ -187,30 +228,25 @@ namespace eval tpm {
 			:show_title "Help:"
 			set data {
 				{"installed" "List all locally installed packages"}
-				{"installed <s fg=red>name(s)</s>" "Show version info of a specific installed package(s)"}
+				{"installed name(s)" "Show version info of a specific installed package(s)"}
 				{"available" "List packages in the remote repository"}
 				{"install name [-f|--force]" "Install latest repository version; force required for system packages"}
 				{"update name [-f|--force]" "Install a newer repository version; force required for system packages"}
 				{"updates" "Check installed packages for available updates"}
 				{"delete name [-f|--force]" "Delete package; force required for system packages"}
+				{"delete name --version VERSION" "Delete only the specified version; add -f for system packages"}
+				{"delete name --all" "Delete all installed versions; add -f for system packages"}
 				{"system" "Shows current system information"}
 				{"help" "Show this help message"}
 				{"exit" "Exit the package manager"}
 			}
-
-			zesty::echo [zesty::box -title {name "Help" anchor "nw" style {fg 159}} -box {type "rounded"} \
-				-content [list text $data \
-					table {
-						enabled "true"
-						columns {20 60}
-						alignments {"left" "left" "left"}
-						styles {
-							{bold 1}
-							{}
-						}
-					} \
-				]
-			]
+			set table [zesty::Table new -lines {show "false"} -header  {show "false"} -showEdge "false"	]
+			$table addColumn -name "Command" -width 30 -style {fg yellow}
+			$table addColumn -name "Description" -style {fg green}
+			foreach line $data {
+				$table addRow "[lindex $line 0]" "[lindex $line 1]"
+			}
+			$table display
 			:show_separator
         }
     }

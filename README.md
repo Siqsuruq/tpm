@@ -69,15 +69,55 @@ repository version:
 
 ```text
 delete json --force
+delete itcl --version 4.3.8
+delete itcl --all --force
 update json -f
 install json --force
 ```
+
+When multiple installations exist, `delete <package>` lists their versions,
+origins, and paths, then asks for an installation number or `all`. Press Enter
+to cancel. Use `--version <version>` to delete that version directly, or `--all`
+to delete every version. System installations still require `-f` / `--force`;
+force alone does not select all versions. If the same version is installed in
+multiple locations, `--version` selects all matching locations; the numbered
+prompt lets you choose one location.
 
 `update <package>` installs only when the repository has a newer version;
 `install <package>` selects the latest repository version. An update installs
 into TPM's configured installation directory and can coexist with an older
 system version. Tcl's runtime files, TPM's private dependencies, and package
 search roots remain protected even with force.
+
+Before installing, TPM stages the requested package and checks `package require`
+in a fresh process using the current Tcl executable. Missing dependencies are
+downloaded recursively, selecting versions compatible with the requested Tcl
+version requirement (including `-exact`). Existing loadable dependencies are
+reused. TPM validates the staged packages before copying them into the install
+directory and records every downloaded dependency in its own manifest.
+The probe loads the version registered by the target archive. If that differs
+from the repository's version, TPM reports the mismatch and retains the
+original metadata as `repository_version` in the manifest.
+
+Probes have a 30-second timeout. Missing repository dependencies, cycles,
+conflicting versions, and other package loading errors stop installation.
+When a loader catches missing-package errors and names those packages in its
+final error (for example, `twapi` or `cffi` on Windows), TPM tries an available
+candidate and probes again. This is inferred from the diagnostic and the
+recorded require calls; unrelated optional missing packages are ignored.
+Repository package names must match their Tcl package registrations; TPM does
+not infer which differently named distribution provides a missing package.
+
+Repository package records may optionally include a `dependencies` list of
+dictionaries with `name`, optional `version`, and optional boolean `exact`:
+
+```tcl
+dependencies {{name json version 1.3} {name example version 2.0 exact 1}}
+```
+
+The subprocess check executes package code; it is not a security sandbox.
+Dependencies loaded only when particular functions are called require explicit
+metadata, since `package require` cannot discover them.
 
 ## 💡 Example Output
 

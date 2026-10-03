@@ -54,11 +54,11 @@ namespace eval tpm {
                 set dir [file normalize $dir]
                 set indexFiles [:findFiles $dir "pkgIndex.tcl"]
                 set tmFiles    [:findFiles $dir "*.tm"]
-                puts "-----------------------------------------------------"
-                puts "Parsing package directory: $dir"
-                puts "Found [llength $indexFiles] pkgIndex.tcl files"
-                puts "Found [llength $tmFiles] Tcl module files"
-                puts "-----------------------------------------------------"
+                #puts "-----------------------------------------------------"
+                #puts "Parsing package directory: $dir"
+                #puts "Found [llength $indexFiles] pkgIndex.tcl files"
+                #puts "Found [llength $tmFiles] Tcl module files"
+                #puts "-----------------------------------------------------"
                 foreach pkgFile $indexFiles {
                     :parse_pkgIndex $pkgFile
                 }

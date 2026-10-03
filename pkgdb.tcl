@@ -47,6 +47,23 @@ namespace eval tpm {
             return $latest
         }
 
+        :public method find_remote_dependency {name requirements {exact 0}} {
+            set latest ""
+            foreach pkg ${:available_pkgs} {
+                if {[dict get $pkg package_name] ne $name} {continue}
+                set version [dict get $pkg version]
+                if {$exact} {
+                    if {[package vcompare $version [lindex $requirements 0]] != 0} {continue}
+                } elseif {[llength $requirements] && ![package vsatisfies $version {*}$requirements]} {
+                    continue
+                }
+                if {$latest eq "" || [package vcompare $version [dict get $latest version]] > 0} {
+                    set latest $pkg
+                }
+            }
+            return $latest
+        }
+
         # Check local installed packages against the remote repository and return
         # a list of dicts {name local_version remote_version latest_remote_pkg}
         # for every installed package that has a newer version available remotely.
