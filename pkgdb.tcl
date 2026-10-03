@@ -129,6 +129,7 @@ namespace eval tpm {
 			set group_paths [dict create]
 			set group_types [dict create]
 			set systemObj [::tpm::system new]
+			set manifests [:load_manifests]
 			# Group raw Tcl package registrations into physical installation units.
 			foreach pkg ${:provided_pkgs} {
 				set type [dict get $pkg type]
@@ -140,6 +141,7 @@ namespace eval tpm {
 					default {
 						# A pkgIndex-based package normally owns its directory.
 						set unit_path [file normalize [dict get $pkg path]]
+						set unit_path [:installation_unit_path $unit_path $manifests]
 					}
 				}
 				# Embedded/runtime packages share physical directories. Keep each
@@ -162,7 +164,6 @@ namespace eval tpm {
 				dict set group_paths $key $unit_path
 				dict set group_types $key $type
 			}
-			set manifests [:load_manifests]
 			set installed {}
 			dict for {key provides} $groups {
 				set path [dict get $group_paths $key]
@@ -200,6 +201,27 @@ namespace eval tpm {
 			}
 
 			set :installed_pkgs $installed
+		}
+
+		:method installation_unit_path {path manifests} {
+			set manifest [:find_manifest_for_path $path $manifests]
+			if {$manifest eq "" || ![dict exists $manifest unit_paths]} {return $path}
+			set owner [dict get $manifest manifest_file]
+			set best $path
+			set parts [file split [file normalize $path]]
+			foreach candidate [dict get $manifest unit_paths] {
+				set candidate [file normalize $candidate]
+				if {![file isfile [file join $candidate pkgIndex.tcl]]} {continue}
+				set candidateParts [file split $candidate]
+				if {[llength $candidateParts] >= [llength [file split $best]]} {continue}
+				set prefix [file join {*}[lrange $parts 0 [expr {[llength $candidateParts] - 1}]]]
+				if {![:paths_equal $prefix $candidate]} {continue}
+				set parentManifest [:find_manifest_for_path $candidate $manifests]
+				if {$parentManifest ne "" && [dict get $parentManifest manifest_file] eq $owner} {
+					set best $candidate
+				}
+			}
+			return $best
 		}
 
 		:method infer_unit_name {path provides} {
