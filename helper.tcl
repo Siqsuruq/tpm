@@ -63,10 +63,10 @@ namespace eval tpm {
 			zesty::echo [zesty::rule -title "name \"<s fg=green>$title</s>\" align left" -style {fg cyan bold 1}]
 		}
 		
-		:method show_error {errMsg} {
+		:method show_error {errMsg {separator 1}} {
 			zesty::echo [zesty::rule -title {name "<s fg=red>Error:</s>" align left} -style {fg cyan bold 1}]
 			zesty::echo "  --> <s fg=red>$errMsg</s>"
-			zesty::echo [zesty::rule -style {fg cyan bold 1}]
+			if {$separator} {:show_separator}
 		}
 		
 		:method show_separator {} {

@@ -199,26 +199,38 @@ namespace eval tpm {
         }
 
         :method install_package {pkgName {force 0}} {
-            set inst [::tpm::installer new -pkgdbObj ${:pkgdbObj}] 
-            try {$inst install $pkgName $force} finally {$inst destroy}
+            :package_action install $pkgName $force
         }
 
         :method update_package {pkgName {force 0}} {
-            set inst [::tpm::installer new -pkgdbObj ${:pkgdbObj}]
-            try {$inst update $pkgName $force} finally {$inst destroy}
+            :package_action update $pkgName $force
         }
 
         :method delete_package {pkgName {force 0} {version ""} {all 0}} {
-			:show_title "Deleting locally installed package:"
-            :cputs_multi [list green " " yellow "$pkgName"]
+            :package_action delete $pkgName $force $version $all
+        }
 
-            if {![${:pkgdbObj} is_installed $pkgName]} {
-                :cputs_multi [list green "Package " yellow "$pkgName" green " is not installed."]
-                return
+        :method package_action {action pkgName force {version ""} {all 0}} {
+            set label [dict get {install Installing update Updating delete Deleting} $action]
+            :show_title "$label package: $pkgName"
+            set inst ""
+            try {
+                if {$action eq "delete" && ![${:pkgdbObj} is_installed $pkgName]} {
+                    :cputs_multi [list green "Package " yellow $pkgName green " is not installed."]
+                    return
+                }
+                set inst [::tpm::installer new -pkgdbObj ${:pkgdbObj}]
+                if {$action eq "delete"} {
+                    $inst uninstall $pkgName $force $version $all
+                } else {
+                    $inst $action $pkgName $force
+                }
+            } on error {message} {
+                :show_error $message 0
+            } finally {
+                if {$inst ne ""} {$inst destroy}
+                :show_separator
             }
-            set inst [::tpm::installer new -pkgdbObj ${:pkgdbObj}] 
-            try {$inst uninstall $pkgName $force $version $all} finally {$inst destroy}
-			:show_separator
         }
 
 
