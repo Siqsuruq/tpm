@@ -24,7 +24,9 @@ namespace eval tpm {
                 set token [::http::geturl $listUrl -binary true -keepalive 1]
 
                 if {[::http::status $token] ne "ok"} {
-                    return -code error "Failed to fetch package list from $listUrl"
+                    set detail [lindex [::http::error $token] 0]
+                    if {$detail eq ""} {set detail [::http::status $token]}
+                    return -code error "Failed to fetch package list from $listUrl: $detail"
                 }
 
                 set body [::http::data $token]

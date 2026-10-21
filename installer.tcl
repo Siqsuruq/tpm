@@ -89,6 +89,9 @@ namespace eval tpm {
             if {[catch {
                 set token [::http::geturl $download_url -binary true]
                 if {[::http::status $token] ne "ok" || [::http::ncode $token] != 200} {
+                    if {[::http::status $token] ne "ok"} {
+                        error "Download failed: [lindex [::http::error $token] 0]"
+                    }
                     error "Download failed: [::http::status $token] [::http::code $token]"
                 }
                 set data  [::http::data $token]

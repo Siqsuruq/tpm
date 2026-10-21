@@ -36,7 +36,7 @@ package require zesty
 
 namespace import zesty::echo
 
-::http::register https 443 ::tls::socket
+source [file join $here https.tcl]
 
 # Load modules
 foreach file {config.tcl helper.tcl pkgParser.tcl system.tcl net.tcl installer.tcl pkgdb.tcl app.tcl} {
