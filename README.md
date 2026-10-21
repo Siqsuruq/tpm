@@ -84,10 +84,17 @@ multiple locations, `--version` selects all matching locations; the numbered
 prompt lets you choose one location.
 
 `update <package>` installs only when the repository has a newer version;
-`install <package>` selects the latest repository version. An update installs
+`install <package>` skips packages already installed; use `--force` to reinstall
+or `update` to check for a newer version. New installations select the latest
+repository version. An update installs
 into TPM's configured installation directory and can coexist with an older
 system version. Tcl's runtime files, TPM's private dependencies, and package
 search roots remain protected even with force.
+
+Repository listings use `/api/v2/packages/list_platform_packages?platform=...`,
+with the platform value returned by Tcl's `platform::generic` (for example,
+`linux-x86_64`). Available packages, installs, updates, and dependency resolution
+all use this platform-specific index.
 
 Before installing, TPM stages the requested package and checks `package require`
 in a fresh process using the current Tcl executable. Missing dependencies are

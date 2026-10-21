@@ -13,6 +13,14 @@ namespace eval tpm {
         }
 
         :public method install {pkgName {force 0}} {
+            if {!$force && [${:pkgdbObj} is_installed $pkgName]} {
+                :cputs_multi [list green "Package " yellow $pkgName green " is already installed. Use update to check for a newer version, or --force to reinstall."]
+                return
+            }
+            :install_from_repository $pkgName $force
+        }
+
+        :method install_from_repository {pkgName force} {
             ${:pkgdbObj} refresh_remote
             set pkg [${:pkgdbObj} find_remote_latest $pkgName]
             if {$pkg eq ""} {
@@ -318,7 +326,7 @@ namespace eval tpm {
             ${:pkgdbObj} refresh_remote
             foreach update [${:pkgdbObj} check_updates] {
                 if {[dict get $update name] eq $pkgName} {
-                    :install $pkgName $force
+                    :install_from_repository $pkgName $force
                     return
                 }
             }

@@ -11,7 +11,8 @@ namespace eval tpm {
             }
 
             set base [string trimright ${:repo_url} "/"]
-            set listUrl "$base/packages/list_packages"
+            set query [::http::formatQuery platform [::platform::generic]]
+            set listUrl "$base/packages/list_platform_packages?$query"
 
             # Animate independently of download size, with elapsed time only.
             set bar [zesty::Bar new -setColumns {zSpinner zName zElapsed}]
