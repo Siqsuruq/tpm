@@ -136,18 +136,20 @@ metadata, since `package require` cannot discover them.
 
 ```bash
 > available
-Fetching packages from remote...
- - nats                 3.1.1   (Tcl): Tcl client for NATS messaging
- - jsonlib              1.0.0   (Tcl): Fast JSON parser
-
-> install nats
-Downloading from: https://tclrepo.daidze.org/api/v2/download/package/abc-uuid
-Installing to: /home/user/.local/lib/tpm
-✓ Package 'nats' installed successfully
-
-> installed nats
-✓ nats                 version: 3.1.1
 ```
+
+![TPM Interactive Commands: installed](https://code.cloudz.cv/tpm/raw/7ee487e2fc43293aa8c97a1aff54c255da7ec08aceb88b7c3220f0a23e230670?m=image/png)
+
+Example of permissions issue:
+
+![TPM Interactive Commands: installed](https://code.cloudz.cv/tpm/raw/d0fe1d4e7ba30b41590b91cd396ed1e1a2492869b993e11150d7690bbba8b328?m=image/png)
+
+```bash
+> install nats
+```
+
+![TPM Interactive Commands: installed](https://code.cloudz.cv/tpm/raw/35018eaf957a3819f0e3e9e993a4156461e410f0e936d35eaafd64e9157c4b38?m=image/png)
+
 
 ## 📂 Folder Structure
 ```bash
