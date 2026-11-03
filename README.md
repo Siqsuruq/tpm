@@ -35,8 +35,10 @@ TPM is a cross-platform command-line utility to download and install packages fr
 1. **Clone this repo** or download it
 
 ```bash
-git clone https://github.com/Siqsuruq/tclrepo
+fossil clone https://code.cloudz.cv/tpm tpm.fossil
+mkdir tpm
 cd tpm
+fossil open ../tpm.fossil
 ```
 
 2. Run the TPM shell:
@@ -58,6 +60,9 @@ tclsh main.tcl
 > delete nats
 > exit
 ```
+
+![TPM Interactive Commands](screenshots/help.png)
+
 
 `installed` shows an **Origin** column: `tpm` for packages recorded in TPM's
 installation manifests, and `system` for packages discovered without a manifest.
