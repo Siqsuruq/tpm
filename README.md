@@ -61,12 +61,14 @@ tclsh main.tcl
 > exit
 ```
 
-![TPM Interactive Commands](https://code.cloudz.cv/tpm/raw/67358872f7cfaf46a6024972597439c3e6e38abe3c8d50cfa9740df6cee2c344?m=image/png)
+![TPM Interactive Commands: help](https://code.cloudz.cv/tpm/raw/67358872f7cfaf46a6024972597439c3e6e38abe3c8d50cfa9740df6cee2c344?m=image/png)
 
 `installed` shows an **Origin** column: `tpm` for packages recorded in TPM's
 installation manifests, and `system` for packages discovered without a manifest.
 Manifests are saved in `var/installed/*.tpm` and survive restarts. Packages
 installed before manifest tracking are treated as system packages too.
+
+![TPM Interactive Commands: installed](https://code.cloudz.cv/tpm/raw/b7908fc96690de21ef9832bbd965287245f9b7f26e07ba34b6fa44ab835548ac?m=image/png)
 
 System packages require `--force` (or `-f`) for deletion or installation of a
 repository version:
