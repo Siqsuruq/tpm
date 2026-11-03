@@ -61,8 +61,7 @@ tclsh main.tcl
 > exit
 ```
 
-![TPM Interactive Commands](screenshots/help.png)
-
+![TPM Interactive Commands](https://code.cloudz.cv/tpm/raw/67358872f7cfaf46a6024972597439c3e6e38abe3c8d50cfa9740df6cee2c344?m=image/png)
 
 `installed` shows an **Origin** column: `tpm` for packages recorded in TPM's
 installation manifests, and `system` for packages discovered without a manifest.
