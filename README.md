@@ -81,6 +81,10 @@ update json -f
 install json --force
 ```
 
+Example delete `nats` package:
+
+![TPM Interactive Commands: installed](https://code.cloudz.cv/tpm/raw/c90398b277cd327cbf72bbcfd27defe662eea3b6b038ab5985854aa6f0da731e?m=image/png)
+
 When multiple installations exist, `delete <package>` lists their versions,
 origins, and paths, then asks for an installation number or `all`. Press Enter
 to cancel. Use `--version <version>` to delete that version directly, or `--all`
